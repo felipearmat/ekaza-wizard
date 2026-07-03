@@ -12,17 +12,48 @@ from sse_starlette.sse import EventSourceResponse
 
 import discovery
 import frigate
+import motion_bridge
 import provisioner
 from models import CameraInfo, DiscoverRequest, ProvisionRequest
 
 _HERE = Path(__file__).parent
-app = FastAPI(title="eKaza Wizard", version="0.1.0")
+_HA_HOST    = os.environ.get("HA_HOST", "192.168.15.35")
+_FRIGATE_PORT = os.environ.get("FRIGATE_PORT", "5000")
+
+app = FastAPI(title="eKaza Wizard", version="0.2.0")
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
+
+_bridge: motion_bridge.BridgeManager | None = None
+
+
+@app.on_event("startup")
+async def _startup():
+    global _bridge
+    _bridge = motion_bridge.BridgeManager(f"http://{_HA_HOST}:{_FRIGATE_PORT}")
+    await _bridge.start()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    if _bridge:
+        await _bridge.stop()
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (_HERE / "static" / "index.html").read_text()
+
+
+@app.get("/api/config")
+async def api_config():
+    """Return saved add-on options so the wizard UI can pre-populate its form."""
+    return {
+        "tuya_access_id":     os.environ.get("TUYA_ACCESS_ID", ""),
+        "tuya_access_secret": os.environ.get("TUYA_ACCESS_SECRET", ""),
+        "tuya_region":        os.environ.get("TUYA_REGION", "us"),
+        "rtsp_password":      os.environ.get("RTSP_PASSWORD", ""),
+        "rtsp_username":      "admin",
+    }
 
 
 @app.post("/api/discover")
@@ -46,6 +77,9 @@ async def api_provision(req: ProvisionRequest):
     async def _stream() -> AsyncGenerator[str, None]:
         async for chunk in provisioner.provision_all(req.cameras):
             yield chunk
+        # Notify bridge of newly provisioned cameras
+        if _bridge:
+            _bridge.notify_provisioned([c.model_dump() for c in req.cameras])
 
     return EventSourceResponse(_stream())
 

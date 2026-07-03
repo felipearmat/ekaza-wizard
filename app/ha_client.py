@@ -42,6 +42,19 @@ async def addon_info(slug: str) -> dict:
     return r.get("data", {})
 
 
+async def find_frigate_slug() -> str | None:
+    """Auto-detect the installed Frigate add-on slug via Supervisor API."""
+    try:
+        r = await supervisor_get("/addons")
+        for addon in r.get("data", {}).get("addons", []):
+            slug = addon.get("slug", "")
+            if "frigate" in slug.lower():
+                return slug
+    except Exception:
+        pass
+    return None
+
+
 # ── HA Core REST (via Supervisor proxy) ───────────────────────────────────────
 
 async def call_service(domain: str, service: str, data: dict | None = None) -> Any:

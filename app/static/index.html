@@ -334,6 +334,7 @@
             <th>Nome (SmartLife)</th>
             <th>Slug (HA)</th>
             <th>IP / MAC</th>
+            <th>Modelo</th>
             <th>Status</th>
             <th>Senha RTSP</th>
           </tr>
@@ -341,6 +342,9 @@
         <tbody>
     `;
     cams.forEach((cam, i) => {
+      const modelBadge = cam.product_id
+        ? `<span title="${cam.product_id}" style="font-size:.75rem;opacity:.7">${cam.product_id.slice(0,8)}…</span>`
+        : `<span style="font-size:.75rem;color:var(--warn)">desconhecido</span>`;
       html += `
         <tr>
           <td>${cam.name}</td>
@@ -350,6 +354,7 @@
             ${cam.ip}
             ${cam.mac ? `<br><span class="mac">${cam.mac}</span>` : ''}
           </td>
+          <td>${modelBadge}</td>
           <td><span class="${cam.online ? 'badge-online' : 'badge-offline'}">
             ${cam.online ? '● online' : '○ offline'}
           </span></td>
@@ -368,6 +373,7 @@
 
   // ── Step 2: Provision ────────────────────────────────────────────────────
   const STEP_LABELS = {
+    onvif_setup:     'ONVIF — ativar + senha RTSP',
     frigate_config:  'Frigate — config de câmeras',
     ptz_scripts:     'Scripts PTZ',
     localtuya:       'LocalTuya — config de entidades',
@@ -458,4 +464,18 @@
     const text = document.getElementById('frigate-snippet').textContent;
     navigator.clipboard.writeText(text).catch(() => {});
   }
+
+  // ── Auto-load saved config on page start ─────────────────────────────────
+  (async () => {
+    try {
+      const res = await fetch('/api/config');
+      if (!res.ok) return;
+      const cfg = await res.json();
+      if (cfg.tuya_access_id)     document.getElementById('access_id').value     = cfg.tuya_access_id;
+      if (cfg.tuya_access_secret) document.getElementById('access_secret').value = cfg.tuya_access_secret;
+      if (cfg.tuya_region)        document.getElementById('region').value         = cfg.tuya_region;
+      if (cfg.rtsp_password)      document.getElementById('rtsp_password').value  = cfg.rtsp_password;
+      if (cfg.rtsp_username)      document.getElementById('rtsp_username').value  = cfg.rtsp_username;
+    } catch {}
+  })();
 </script>

@@ -5,58 +5,56 @@ The xZetsubou/hass-localtuya flow steps (as of v2025):
   Step 1 "user":    host, device_id, local_key, protocol_version, friendly_name, manual_dps
   Step 2..N "entity_X": one form per entity/DP with platform-specific fields
 
-We fill step 1 from camera data, then auto-fill each entity step using EKAZA_ENTITIES.
-If the flow schema changes in a future LocalTuya version, inspect the step's
-data_schema in the result and extend the auto-fill logic below.
+Entity definitions come from the camera's schema (if known) or fall back to EKAZA_ENTITIES.
 """
 import json
 
-from constants import EKAZA_ENTITIES
+import schema_store
+from constants import EKAZA_ENTITIES, EKAZA_DPS_MANUAL
 from ha_client import with_websocket, _ws_send_recv
 from models import CameraInfo
 
 
-def _step1_data(cam: CameraInfo) -> dict:
-    from constants import EKAZA_DPS_MANUAL
+async def _resolve_entities(cam: CameraInfo) -> tuple[list[dict], str]:
+    """Return (entities, dps_manual) for this camera, using schema if available."""
+    if cam.product_id:
+        sch = schema_store._load_local(cam.product_id)
+        if sch and sch.get("entities"):
+            return sch["entities"], sch.get("dps_manual", EKAZA_DPS_MANUAL)
+    return EKAZA_ENTITIES, EKAZA_DPS_MANUAL
+
+
+def _step1_data(cam: CameraInfo, dps_manual: str) -> dict:
     return {
         "host": cam.ip,
         "device_id": cam.device_id,
         "local_key": cam.local_key,
         "protocol_version": "3.5",
-        "friendly_name": f"eKaza {cam.name}",
-        "manual_dps": EKAZA_DPS_MANUAL,
+        "friendly_name": cam.name,
+        "manual_dps": dps_manual,
     }
 
 
 def _entity_step_data(entity: dict) -> dict:
-    """Build form data for one entity step from the EKAZA_ENTITIES definition."""
     platform = entity["platform"]
     base = {
         "platform": platform,
         "friendly_name": entity["friendly_name"],
         "id": entity["dp"],
     }
-
     if platform == "switch":
         base["is_passive_entity"] = entity.get("is_passive", False)
-
     elif platform == "select":
-        opts = entity.get("select_options", {})
-        base["select_options"] = opts
-
+        base["select_options"] = entity.get("select_options", {})
     elif platform == "number":
         base["min_value"] = entity.get("min_value", 0.0)
         base["max_value"] = entity.get("max_value", 100.0)
         base["step_size"] = entity.get("step_size", 1.0)
-
     return base
 
 
 async def configure(cam: CameraInfo) -> tuple[bool, str]:
-    """
-    Run the full LocalTuya config flow for one camera.
-    Returns (success, detail).
-    """
+    """Run the full LocalTuya config flow for one camera. Returns (success, detail)."""
     try:
         result = await _run_flow(cam)
         if result.get("type") == "create_entry":
@@ -67,6 +65,8 @@ async def configure(cam: CameraInfo) -> tuple[bool, str]:
 
 
 async def _run_flow(cam: CameraInfo) -> dict:
+    entities, dps_manual = await _resolve_entities(cam)
+
     async def _action(ws, next_id):
         # ── Step 1: device credentials ─────────────────────────────────────
         r = await _ws_send_recv(ws, next_id(), "config_entries/flow/init", handler="localtuya")
@@ -77,12 +77,12 @@ async def _run_flow(cam: CameraInfo) -> dict:
             ws, next_id(),
             "config_entries/flow/progress",
             flow_id=result["flow_id"],
-            user_input=_step1_data(cam),
+            user_input=_step1_data(cam, dps_manual),
         )
         result = r.get("result", {})
 
         # ── Steps 2..N: one entity per DP ─────────────────────────────────
-        entity_iter = iter(EKAZA_ENTITIES)
+        entity_iter = iter(entities)
         while result.get("type") == "form":
             step_id = result.get("step_id", "")
 
@@ -91,15 +91,13 @@ async def _run_flow(cam: CameraInfo) -> dict:
                     entity = next(entity_iter)
                     user_input = _entity_step_data(entity)
                 except StopIteration:
-                    # no more entities — signal finish (empty submit or "no_entity_id")
-                    user_input = {}
+                    user_input = {}  # no more entities — signal finish
 
-            elif step_id == "no_more_entities" or step_id == "finish":
+            elif step_id in ("no_more_entities", "finish"):
                 user_input = {}
 
             else:
-                # unknown step — submit empty to advance
-                user_input = {}
+                user_input = {}  # unknown step — advance with empty submit
 
             r = await _ws_send_recv(
                 ws, next_id(),
