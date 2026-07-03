@@ -1,0 +1,461 @@
+<title>eKaza Wizard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f6fa;
+    --surface: #ffffff;
+    --border: #e0e3ea;
+    --text: #1a1d23;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --ok: #16a34a;
+    --error: #dc2626;
+    --warn: #d97706;
+    --radius: 10px;
+    --shadow: 0 2px 12px rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117;
+      --surface: #1c1f2a;
+      --border: #2d3148;
+      --text: #e8eaf0;
+      --muted: #9ca3af;
+      --shadow: 0 2px 12px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f6fa; --surface: #ffffff; --border: #e0e3ea;
+    --text: #1a1d23; --muted: #6b7280; --shadow: 0 2px 12px rgba(0,0,0,.08);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1117; --surface: #1c1f2a; --border: #2d3148;
+    --text: #e8eaf0; --muted: #9ca3af; --shadow: 0 2px 12px rgba(0,0,0,.35);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+
+  .wizard {
+    width: 100%;
+    max-width: 720px;
+  }
+
+  h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: .25rem; }
+  .subtitle { color: var(--muted); font-size: .9rem; margin-bottom: 2rem; }
+
+  /* Steps indicator */
+  .steps-bar {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: 2rem;
+  }
+  .step-dot {
+    flex: 1;
+    height: 4px;
+    border-radius: 4px;
+    background: var(--border);
+    transition: background .3s;
+  }
+  .step-dot.active { background: var(--accent); }
+  .step-dot.done   { background: var(--ok); }
+
+  /* Card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1rem;
+  }
+  .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
+
+  /* Form */
+  .field { margin-bottom: 1rem; }
+  label { display: block; font-size: .85rem; font-weight: 500; color: var(--muted); margin-bottom: .35rem; }
+  input, select {
+    width: 100%;
+    padding: .55rem .75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: .95rem;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .6rem 1.2rem;
+    border: none;
+    border-radius: 6px;
+    font-size: .95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .2s, opacity .2s;
+  }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .actions { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+
+  /* Camera table */
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th { text-align: left; font-size: .8rem; font-weight: 600; color: var(--muted);
+       padding: .5rem .75rem; border-bottom: 1px solid var(--border); }
+  td { padding: .6rem .75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .slug-input { width: 100%; background: transparent; border: 1px solid transparent;
+                border-radius: 4px; padding: .2rem .4rem; color: var(--text); font-size: .9rem; }
+  .slug-input:focus { border-color: var(--accent); background: var(--bg); outline: none; }
+  .pw-field { display: flex; align-items: center; gap: .4rem; }
+  .pw-field input { flex: 1; font-size: .85rem; }
+  .badge-online  { color: var(--ok);   font-size: .8rem; font-weight: 600; }
+  .badge-offline { color: var(--warn); font-size: .8rem; font-weight: 600; }
+  .mac { font-size: .75rem; color: var(--muted); font-family: monospace; }
+  .empty { text-align: center; padding: 2rem; color: var(--muted); }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Progress log */
+  .log { display: flex; flex-direction: column; gap: .5rem; }
+  .log-line {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .5rem .75rem; border-radius: 6px; font-size: .9rem;
+    background: var(--bg); border: 1px solid var(--border);
+  }
+  .log-icon { font-size: 1.1rem; min-width: 1.25rem; text-align: center; }
+  .log-body { flex: 1; }
+  .log-body .cam  { font-weight: 600; }
+  .log-body .step { color: var(--muted); font-size: .8rem; }
+  .log-line.ok    { border-color: var(--ok);    background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+  .log-line.error { border-color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--surface)); }
+
+  /* Alert banner */
+  .alert { padding: .75rem 1rem; border-radius: 6px; font-size: .9rem; margin-bottom: 1rem; }
+  .alert.error { background: color-mix(in srgb, var(--error) 12%, var(--surface)); border: 1px solid var(--error); color: var(--error); }
+  .alert.info  { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border: 1px solid var(--accent); }
+
+  /* Snippet box */
+  pre.snippet {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 1rem; overflow-x: auto; font-size: .8rem; white-space: pre;
+    margin-top: .5rem;
+  }
+  .copy-btn { font-size: .8rem; padding: .3rem .7rem; }
+</style>
+
+<div class="wizard">
+  <h1>📷 eKaza Wizard</h1>
+  <p class="subtitle">Provisionamento automático de câmeras eKaza no Home Assistant</p>
+
+  <div class="steps-bar">
+    <div class="step-dot active" id="dot-0"></div>
+    <div class="step-dot" id="dot-1"></div>
+    <div class="step-dot" id="dot-2"></div>
+  </div>
+
+  <!-- STEP 0: Credentials -->
+  <div id="step-0">
+    <div class="card">
+      <h2>Credenciais do projeto Tuya</h2>
+      <div class="row2">
+        <div class="field">
+          <label>Access ID (Client ID)</label>
+          <input id="access_id" placeholder="hkddgu7p5hj…" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Access Secret</label>
+          <input id="access_secret" type="password" placeholder="f44d4837…" autocomplete="off">
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>Região</label>
+          <select id="region">
+            <option value="us">us (Americas)</option>
+            <option value="eu">eu (Europe)</option>
+            <option value="cn">cn (China)</option>
+            <option value="in">in (India)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Usuário RTSP (padrão: admin)</label>
+          <input id="rtsp_username" value="admin">
+        </div>
+      </div>
+      <div class="field">
+        <label>Senha RTSP padrão (definida no ONVIF do SmartLife)</label>
+        <input id="rtsp_password" type="password" placeholder="senha padrão para todas as câmeras">
+      </div>
+      <div id="discover-error" class="alert error" style="display:none"></div>
+    </div>
+    <div class="actions">
+      <span></span>
+      <button class="btn btn-primary" id="btn-discover" onclick="doDiscover()">
+        Descobrir câmeras →
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 1: Camera review -->
+  <div id="step-1" style="display:none">
+    <div class="card">
+      <h2>Câmeras descobertas</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">
+        Confirme os slugs (prefixo das entidades no HA) e ajuste senhas individuais se necessário.
+        Fixe os IPs no roteador pelo MAC antes de prosseguir.
+      </p>
+      <div id="cameras-table-wrap">
+        <div class="empty">Nenhuma câmera encontrada.</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-ghost" onclick="goStep(0)">← Voltar</button>
+      <button class="btn btn-primary" id="btn-provision" onclick="doProvision()">
+        Provisionar →
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Progress -->
+  <div id="step-2" style="display:none">
+    <div class="card">
+      <h2>Provisionando…</h2>
+      <div class="log" id="log"></div>
+    </div>
+    <div id="frigate-snippet-card" class="card" style="display:none">
+      <h2>⚠️ Config do Frigate não encontrada automaticamente</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:.5rem">
+        Cole este bloco no seu arquivo de config do Frigate e reinicie o add-on:
+      </p>
+      <pre class="snippet" id="frigate-snippet"></pre>
+      <button class="btn btn-ghost copy-btn" onclick="copySnippet()">Copiar</button>
+    </div>
+    <div class="actions" id="step2-actions" style="display:none">
+      <span></span>
+      <button class="btn btn-primary" onclick="goStep(0)">Provisionar outra câmera</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────────
+  let credentials = {};
+  let cameras = [];
+
+  // ── Navigation ───────────────────────────────────────────────────────────
+  function goStep(n) {
+    [0,1,2].forEach(i => {
+      document.getElementById(`step-${i}`).style.display = i === n ? '' : 'none';
+      const dot = document.getElementById(`dot-${i}`);
+      dot.className = 'step-dot' + (i < n ? ' done' : i === n ? ' active' : '');
+    });
+  }
+
+  // ── Step 0: Discover ─────────────────────────────────────────────────────
+  async function doDiscover() {
+    const btn = document.getElementById('btn-discover');
+    const errEl = document.getElementById('discover-error');
+    errEl.style.display = 'none';
+
+    credentials = {
+      access_id:            document.getElementById('access_id').value.trim(),
+      access_secret:        document.getElementById('access_secret').value.trim(),
+      region:               document.getElementById('region').value,
+      default_rtsp_password: document.getElementById('rtsp_password').value,
+      rtsp_username:        document.getElementById('rtsp_username').value.trim() || 'admin',
+    };
+
+    if (!credentials.access_id || !credentials.access_secret || !credentials.default_rtsp_password) {
+      errEl.textContent = 'Preencha Access ID, Access Secret e Senha RTSP.';
+      errEl.style.display = '';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Buscando…';
+
+    try {
+      const res = await fetch('/api/discover', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({credentials}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Erro desconhecido');
+
+      cameras = data.cameras;
+      renderCameraTable(cameras);
+      goStep(1);
+    } catch (e) {
+      errEl.textContent = `Erro: ${e.message}`;
+      errEl.style.display = '';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Descobrir câmeras →';
+    }
+  }
+
+  // ── Camera table ─────────────────────────────────────────────────────────
+  function renderCameraTable(cams) {
+    const wrap = document.getElementById('cameras-table-wrap');
+    if (!cams.length) {
+      wrap.innerHTML = '<div class="empty">Nenhuma câmera eKaza encontrada no projeto.</div>';
+      return;
+    }
+    let html = `
+      <table>
+        <thead>
+          <tr>
+            <th>Nome (SmartLife)</th>
+            <th>Slug (HA)</th>
+            <th>IP / MAC</th>
+            <th>Status</th>
+            <th>Senha RTSP</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    cams.forEach((cam, i) => {
+      html += `
+        <tr>
+          <td>${cam.name}</td>
+          <td><input class="slug-input" data-i="${i}" value="${cam.slug}"
+               oninput="cameras[this.dataset.i].slug = this.value"></td>
+          <td>
+            ${cam.ip}
+            ${cam.mac ? `<br><span class="mac">${cam.mac}</span>` : ''}
+          </td>
+          <td><span class="${cam.online ? 'badge-online' : 'badge-offline'}">
+            ${cam.online ? '● online' : '○ offline'}
+          </span></td>
+          <td>
+            <div class="pw-field">
+              <input type="password" value="${cam.rtsp_password}"
+                     data-i="${i}" oninput="cameras[this.dataset.i].rtsp_password = this.value">
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  }
+
+  // ── Step 2: Provision ────────────────────────────────────────────────────
+  const STEP_LABELS = {
+    frigate_config:  'Frigate — config de câmeras',
+    ptz_scripts:     'Scripts PTZ',
+    localtuya:       'LocalTuya — config de entidades',
+    reload_scripts:  'Recarregar scripts HA',
+    restart_frigate: 'Reiniciar Frigate',
+    dashboard:       'Dashboard Lovelace',
+    done:            'Concluído',
+  };
+
+  const STEP_ICONS = {ok: '✅', error: '❌', running: '⏳', skip: '⏭️'};
+
+  async function doProvision() {
+    goStep(2);
+    const log = document.getElementById('log');
+    log.innerHTML = '';
+
+    const body = JSON.stringify({credentials, cameras});
+    const res = await fetch('/api/provision', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body,
+    });
+
+    const lines = {};
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.replace(/^data: /, '').trim();
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line);
+          processEvent(ev, log, lines);
+        } catch {}
+      }
+    }
+
+    document.getElementById('step2-actions').style.display = '';
+  }
+
+  function processEvent(ev, log, lines) {
+    const {camera, step, status, detail} = ev;
+    const key = `${camera}__${step}`;
+    const label = STEP_LABELS[step] || step;
+    const camLabel = camera === 'global' ? '' : camera;
+
+    if (step === 'frigate_config' && status === 'error' && detail.includes('Add manually')) {
+      // show snippet card
+      const snippetMatch = detail.match(/Add manually:\n\n([\s\S]+)/);
+      if (snippetMatch) {
+        document.getElementById('frigate-snippet').textContent = snippetMatch[1];
+        document.getElementById('frigate-snippet-card').style.display = '';
+      }
+    }
+
+    if (lines[key]) {
+      lines[key].className = `log-line ${status}`;
+      lines[key].querySelector('.log-icon').textContent = STEP_ICONS[status] || '•';
+      if (detail && status !== 'running') {
+        lines[key].querySelector('.step').textContent = detail;
+      }
+      return;
+    }
+
+    const el = document.createElement('div');
+    el.className = `log-line ${status}`;
+    el.innerHTML = `
+      <span class="log-icon">${STEP_ICONS[status] || '•'}</span>
+      <div class="log-body">
+        ${camLabel ? `<span class="cam">${camLabel}</span> — ` : ''}<span>${label}</span>
+        <div class="step">${detail || ''}</div>
+      </div>
+    `;
+    log.appendChild(el);
+    lines[key] = el;
+    el.scrollIntoView({block: 'nearest'});
+  }
+
+  function copySnippet() {
+    const text = document.getElementById('frigate-snippet').textContent;
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+</script>
