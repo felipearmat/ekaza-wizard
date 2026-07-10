@@ -1,7 +1,8 @@
-"""Camera discovery: Tuya cloud + local UDP scan."""
+"""Camera discovery: Tuya cloud (primary) + local UDP scan (IP enrichment)."""
 import asyncio
 import hashlib
 import hmac
+import logging
 import re
 import time
 
@@ -10,6 +11,8 @@ import tinytuya
 
 from . import schema_store
 from .models import CameraInfo, TuyaCredentials
+
+_LOGGER = logging.getLogger(__name__)
 
 _TUYA_BASE = {
     "us": "https://openapi.tuyaus.com",
@@ -41,38 +44,72 @@ def _tuya_get(base: str, path: str, access_id: str, secret: str, token: str | No
         headers["access_token"] = token
     try:
         return requests.get(base + path, headers=headers, timeout=10).json()
-    except Exception:
+    except Exception as exc:
+        _LOGGER.debug("Tuya GET %s failed: %s", path, exc)
         return {}
 
 
 def _cloud_devices(creds: TuyaCredentials) -> list[dict]:
     base = _TUYA_BASE.get(creds.region, _TUYA_BASE["us"])
 
-    # Get token
+    # 1. Get token + uid (uid identifies the account owner)
     token_r = _tuya_get(base, "/v1.0/token?grant_type=1", creds.access_id, creds.access_secret)
     if not token_r.get("success"):
+        _LOGGER.warning("Tuya token failed: %s", token_r.get("msg", token_r))
         return []
     token = token_r["result"]["access_token"]
+    uid = token_r["result"].get("uid", "")
+    if not uid:
+        _LOGGER.warning("Tuya token response missing uid — check access_id/secret/region")
+        return []
 
-    # Get device by known device ID from local scan first
-    devices = []
+    # 2. List ALL devices in account via Cloud API (no UDP scan required)
+    devices: list[dict] = []
+    page = 1
+    while True:
+        r = _tuya_get(
+            base,
+            f"/v1.0/iot-03/devices?user_id={uid}&page_size=100&page_no={page}&schema=1",
+            creds.access_id, creds.access_secret, token,
+        )
+        if not r.get("success"):
+            _LOGGER.warning("Device list page %d failed: %s", page, r.get("msg", r))
+            break
+        batch = r.get("result", {}).get("list", [])
+        if not batch:
+            break
+        devices.extend(batch)
+        _LOGGER.debug("Tuya cloud: %d devices on page %d", len(batch), page)
+        if len(batch) < 100:
+            break
+        page += 1
+
+    if not devices:
+        _LOGGER.warning("No devices returned from Tuya Cloud for uid=%s", uid)
+        return []
+
+    # 3. UDP scan for IP enrichment (best-effort — may fail in container environments)
+    local: dict[str, dict] = {}
     try:
         scan = tinytuya.deviceScan(verbose=False, maxretry=4)
         if isinstance(scan, dict):
-            for ip_key, info in scan.items():
+            for info in scan.values():
                 dev_id = info.get("gwId") or info.get("id", "")
-                if not dev_id:
-                    continue
-                r = _tuya_get(base, f"/v1.0/iot-03/devices/{dev_id}",
-                              creds.access_id, creds.access_secret, token)
-                if r.get("success") and isinstance(r.get("result"), dict):
-                    d = r["result"]
-                    d["ip"] = info.get("ip", "")
-                    d["mac"] = info.get("mac", "")
-                    d["online"] = True
-                    devices.append(d)
-    except Exception:
-        pass
+                if dev_id:
+                    local[dev_id] = info
+        _LOGGER.debug("UDP scan found %d devices", len(local))
+    except Exception as exc:
+        _LOGGER.debug("UDP scan failed (normal in container): %s", exc)
+
+    # 4. Merge local IPs into cloud device list
+    for dev in devices:
+        dev_id = dev.get("id", "")
+        if dev_id in local:
+            dev["ip"] = local[dev_id].get("ip", dev.get("ip", ""))
+            dev["mac"] = local[dev_id].get("mac", dev.get("mac", ""))
+        else:
+            dev.setdefault("ip", "")
+            dev.setdefault("mac", "")
 
     return devices
 
