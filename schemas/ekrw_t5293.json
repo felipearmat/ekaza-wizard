@@ -1,7 +1,8 @@
 {
   "product_id": "wg808xnwx1zeavq2",
-  "model_name": "eKaza EKRW-T5293",
+  "model_name": "EKRW-T5293",
   "category": "sp",
+  "fetched_at": null,
   "capabilities": {
     "ptz": true,
     "zoom": true,

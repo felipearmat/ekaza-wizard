@@ -17,8 +17,7 @@ import provisioner
 from models import CameraInfo, DiscoverRequest, ProvisionRequest
 
 _HERE = Path(__file__).parent
-_HA_HOST    = os.environ.get("HA_HOST", "192.168.15.35")
-_FRIGATE_PORT = os.environ.get("FRIGATE_PORT", "5000")
+_FRIGATE_URL = f"http://localhost:{os.environ.get('FRIGATE_PORT', '5000')}"
 
 app = FastAPI(title="eKaza Wizard", version="0.2.0")
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
@@ -29,7 +28,7 @@ _bridge: motion_bridge.BridgeManager | None = None
 @app.on_event("startup")
 async def _startup():
     global _bridge
-    _bridge = motion_bridge.BridgeManager(f"http://{_HA_HOST}:{_FRIGATE_PORT}")
+    _bridge = motion_bridge.BridgeManager(_FRIGATE_URL)
     await _bridge.start()
 
 

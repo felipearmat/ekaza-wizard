@@ -70,6 +70,8 @@ rtsp_password: "SUA_SENHA"
 
 Se preferir, todos os campos podem ser preenchidos diretamente na interface do wizard.
 
+> **`FRIGATE_SLUG`** só precisa ser definido se a detecção automática do Frigate falhar. O wizard detecta o slug via Supervisor API e exibe uma mensagem de erro clara caso não encontre.
+
 ---
 
 ## Como usar

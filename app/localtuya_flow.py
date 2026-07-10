@@ -5,23 +5,26 @@ The xZetsubou/hass-localtuya flow steps (as of v2025):
   Step 1 "user":    host, device_id, local_key, protocol_version, friendly_name, manual_dps
   Step 2..N "entity_X": one form per entity/DP with platform-specific fields
 
-Entity definitions come from the camera's schema (if known) or fall back to EKAZA_ENTITIES.
+Entity definitions come from the camera's schema (fetched and cached during discovery).
 """
-import json
-
 import schema_store
-from constants import EKAZA_ENTITIES, EKAZA_DPS_MANUAL
 from ha_client import with_websocket, _ws_send_recv
 from models import CameraInfo
 
 
 async def _resolve_entities(cam: CameraInfo) -> tuple[list[dict], str]:
-    """Return (entities, dps_manual) for this camera, using schema if available."""
-    if cam.product_id:
-        sch = schema_store._load_local(cam.product_id)
-        if sch and sch.get("entities"):
-            return sch["entities"], sch.get("dps_manual", EKAZA_DPS_MANUAL)
-    return EKAZA_ENTITIES, EKAZA_DPS_MANUAL
+    """Return (entities, dps_manual) from the camera's dynamic schema.
+
+    Raises RuntimeError if no schema is cached — discovery must run before provisioning.
+    """
+    sch = schema_store._load_local(cam.product_id, cam.model_name)
+    if sch and sch.get("entities"):
+        return sch["entities"], sch.get("dps_manual", "")
+    raise RuntimeError(
+        f"Schema para '{cam.name}' não encontrado "
+        f"(model={cam.model_name!r}, product_id={cam.product_id!r}). "
+        "Execute a descoberta antes de provisionar."
+    )
 
 
 def _step1_data(cam: CameraInfo, dps_manual: str) -> dict:

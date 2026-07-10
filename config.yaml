@@ -10,6 +10,7 @@ arch:
   - armv7
 startup: services
 boot: manual
+# full_access required: writes /config/scripts/, reads /addon_configs/{frigate}/config.yaml
 full_access: true
 ingress: true
 ingress_port: 7788
@@ -22,11 +23,13 @@ options:
   tuya_access_secret: ""
   tuya_region: "us"
   rtsp_password: ""
+  frigate_slug: ""
 schema:
   tuya_access_id: str
   tuya_access_secret: str
   tuya_region: str
   rtsp_password: str
+  frigate_slug: str
 hassio_api: true
 homeassistant_api: true
 auth_api: true

@@ -14,10 +14,9 @@ import scripts_gen
 from constants import ONVIF_ENABLE_DP, ONVIF_SET_PWD_DP
 from models import CameraInfo, TuyaCredentials
 
-_HA_HOST   = os.environ.get("HA_HOST", "192.168.15.35")
-_FRIGATE_PORT = os.environ.get("FRIGATE_PORT", "5000")
+_FRIGATE_URL = f"http://localhost:{os.environ.get('FRIGATE_PORT', '5000')}"
 
-# Resolved once at startup; falls back to env var if supervisor call fails
+# Cached after first successful detection; None forces re-detection
 _frigate_slug: str | None = None
 
 
@@ -26,7 +25,13 @@ async def _get_frigate_slug() -> str:
     if _frigate_slug:
         return _frigate_slug
     detected = await ha_client.find_frigate_slug()
-    _frigate_slug = detected or os.environ.get("FRIGATE_SLUG", "ccab4aaf_frigate-fa")
+    slug = detected or os.environ.get("FRIGATE_SLUG", "")
+    if not slug:
+        raise RuntimeError(
+            "Add-on Frigate não encontrado automaticamente. "
+            "Configure FRIGATE_SLUG nas opções do add-on (ex: ccab4aaf_frigate)."
+        )
+    _frigate_slug = slug
     return _frigate_slug
 
 
@@ -39,11 +44,9 @@ def _enable_onvif(cam: CameraInfo) -> tuple[bool, str]:
     try:
         d = tinytuya.Device(dev_id=cam.device_id, address=cam.ip, local_key=cam.local_key, version=3.3)
         d.set_socketTimeout(5)
-        # Enable ONVIF
         r = d.set_value(ONVIF_ENABLE_DP, True)
         if r is None or "Error" in str(r):
             return False, f"ONVIF enable failed: {r}"
-        # Set RTSP password
         pwd_payload = json.dumps({"pwd": cam.rtsp_password})
         r = d.set_value(ONVIF_SET_PWD_DP, pwd_payload)
         if r is None or "Error" in str(r):
@@ -55,8 +58,11 @@ def _enable_onvif(cam: CameraInfo) -> tuple[bool, str]:
 
 async def provision_all(cameras: list[CameraInfo]) -> AsyncGenerator[str, None]:
     """SSE generator — one JSON event per provisioning step."""
-    frigate_slug = await _get_frigate_slug()
-    frigate_host = f"http://{_HA_HOST}:{_FRIGATE_PORT}"
+    try:
+        frigate_slug = await _get_frigate_slug()
+    except RuntimeError as e:
+        yield _event("global", "init", "error", str(e))
+        return
 
     # ── Step 0: ONVIF enable on all cameras ──────────────────────────────────
     loop = asyncio.get_event_loop()
@@ -93,7 +99,7 @@ async def provision_all(cameras: list[CameraInfo]) -> AsyncGenerator[str, None]:
     yield _event("global", "restart_frigate", "ok" if ok else "error")
 
     yield _event("global", "dashboard", "running")
-    ok, detail = await dashboard.update_dashboard(cameras, frigate_host)
+    ok, detail = await dashboard.update_dashboard(cameras, _FRIGATE_URL)
     yield _event("global", "dashboard", "ok" if ok else "error", detail)
 
     yield _event("global", "done", "ok")

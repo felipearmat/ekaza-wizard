@@ -2,21 +2,22 @@
 
 Resolution order:
   1. /data/schemas/{model_slug}.json  — cached on first cloud fetch (persists across restarts)
-  2. /schemas/{product_id}.json       — bundled in image (read-only, legacy key)
-  3. Tuya cloud — /v1.1/devices/{id}/specifications + /v1.0/devices/{id}
+  2. /schemas/{model_slug}.json       — bundled in image (read-only fallback)
+  3. /schemas/{product_id}.json       — legacy bundled naming (backward-compat)
+  4. Tuya cloud — /v1.1/specifications (writable DPs) + /v2.0/shadow/properties (read-only DPs)
 """
 import asyncio
 import json
 import re
+import time
 from pathlib import Path
-from typing import Any
 
 import tinytuya
 
 _BUNDLED = Path("/schemas")
-_DATA = Path("/data/schemas")
+_DATA    = Path("/data/schemas")
 
-# Codes that should never become LocalTuya entities (read-only or write-only specials)
+# Codes excluded from LocalTuya entities (read-only, binary payloads, or write-only specials)
 _SKIP_ENTITY = {
     "sd_storge", "sd_status", "movement_detect_pic", "sd_format_state",
     "doorbell_active", "decibel_upload", "alarm_message", "initiative_message",
@@ -69,9 +70,8 @@ def _label(code: str) -> str:
 
 
 def _model_slug(model_name: str) -> str:
-    """Convert model name to a safe filename slug, e.g. 'EKRW-T5293' → 'ekrw_t5293'."""
-    slug = re.sub(r"[^a-z0-9]+", "_", model_name.lower()).strip("_")
-    return slug or "unknown"
+    """'EKRW-T5293' → 'ekrw_t5293'"""
+    return re.sub(r"[^a-z0-9]+", "_", model_name.lower()).strip("_") or "unknown"
 
 
 def _load_local(product_id: str, model_name: str = "") -> dict | None:
@@ -109,7 +109,12 @@ def _persist(schema: dict) -> None:
 
 
 def _build_from_cloud(device_id: str, creds: dict) -> dict | None:
-    """Fetch schema via /v1.1/devices/{id}/specifications (single call, includes dp_ids)."""
+    """Fetch schema using Tuya cloud APIs.
+
+    Uses two endpoints:
+    - /v1.1/specifications → writable DPs with dp_ids (functions)
+    - /v2.0/shadow/properties → ALL DPs including read-only (alarm_message, onvif_change_pwd, etc.)
+    """
     try:
         cloud = tinytuya.Cloud(
             apiRegion=creds["region"],
@@ -118,38 +123,40 @@ def _build_from_cloud(device_id: str, creds: dict) -> dict | None:
             apiDeviceID=device_id,
         )
 
-        # v1.1/specifications returns functions with dp_ids in one call —
-        # replaces the old /v1.0/iot-03/functions + /v2.0/shadow/properties dance
         spec_r = cloud.cloudrequest(f"/v1.1/devices/{device_id}/specifications", "GET")
         spec_fns = spec_r.get("result", {}).get("functions", [])
         if not spec_fns:
             return None
 
+        # Shadow properties cover read-only DPs not in /specifications (alarm_message=185, etc.)
+        sh_r = cloud.cloudrequest(f"/v2.0/cloud/thing/{device_id}/shadow/properties", "GET")
+        shadow_props = sh_r.get("result", {}).get("properties", [])
+
         dev_r = cloud.cloudrequest(f"/v1.0/devices/{device_id}", "GET")
         dev = dev_r.get("result", {})
 
-        return _assemble(dev, spec_fns)
+        return _assemble(dev, spec_fns, shadow_props)
     except Exception:
         return None
 
 
-def _assemble(dev: dict, spec_fns: list[dict]) -> dict:
-    """Build a wizard schema from device info + spec functions (v1.1 format)."""
+def _assemble(dev: dict, spec_fns: list[dict], shadow_props: list[dict] | None = None) -> dict:
+    """Build a wizard schema from device info, writable specs, and shadow properties."""
     entities: list[dict] = []
     dp_map:   list[dict] = []
     dps_list: list[str]  = []
 
+    # Writable DPs from /v1.1/specifications
     for f in spec_fns:
-        dp   = f.get("dp_id")
-        code = f.get("code", "")
+        dp    = f.get("dp_id")
+        code  = f.get("code", "")
         ftype = f.get("type", "")
         try:
             values = json.loads(f.get("values", "{}") or "{}")
         except Exception:
             values = {}
 
-        dp_map.append({"dp": dp, "code": code, "type": ftype,
-                        "writable": True, "values": values})
+        dp_map.append({"dp": dp, "code": code, "type": ftype, "writable": True, "values": values})
 
         if code in _SKIP_ENTITY or not ftype or not dp:
             continue
@@ -178,6 +185,18 @@ def _assemble(dev: dict, spec_fns: list[dict]) -> dict:
                 "step_size": float(values.get("step", 1)),
             })
 
+    # Merge read-only DPs from shadow/properties (alarm_message, onvif_change_pwd, etc.)
+    # These are not in /specifications but LocalTuya needs them in dps_manual for polling
+    existing_codes = {e["code"] for e in dp_map}
+    for p in (shadow_props or []):
+        dp   = p.get("dp_id")
+        code = p.get("code", "")
+        if code and code not in existing_codes and dp:
+            dp_map.append({"dp": dp, "code": code, "type": p.get("type", ""),
+                            "writable": False, "values": {}})
+            dps_list.append(str(dp))
+            existing_codes.add(code)
+
     codes = {e["code"] for e in dp_map}
 
     def _find_dp(code: str) -> int | None:
@@ -199,13 +218,14 @@ def _assemble(dev: dict, spec_fns: list[dict]) -> dict:
     }
 
     return {
-        "product_id": dev.get("product_id", ""),
-        "model_name": dev.get("model", dev.get("product_name", "")),
-        "category":   dev.get("category", ""),
+        "product_id":   dev.get("product_id", ""),
+        "model_name":   dev.get("model", dev.get("product_name", "")),
+        "category":     dev.get("category", ""),
+        "fetched_at":   int(time.time()),
         "capabilities": caps,
-        "dps_manual": ",".join(dps_list),
-        "entities":   entities,
-        "dp_map":     dp_map,
+        "dps_manual":   ",".join(dps_list),
+        "entities":     entities,
+        "dp_map":       dp_map,
     }
 
 
@@ -234,7 +254,6 @@ def is_camera(schema: dict | None, dev: dict) -> bool:
     if schema:
         caps = schema.get("capabilities", {})
         return caps.get("ptz", False) or dev.get("category") == "sp"
-    # Fallback: category or name heuristic
     if dev.get("category") in ("sp", "ipc"):
         return True
     name = dev.get("name", "").lower()
