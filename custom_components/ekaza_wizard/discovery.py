@@ -83,7 +83,7 @@ def _local_scan() -> dict[str, dict]:
 
 
 async def discover(creds: TuyaCredentials) -> list[CameraInfo]:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     creds_dict = {"region": creds.region, "access_id": creds.access_id, "access_secret": creds.access_secret}
 
     devices = await loop.run_in_executor(None, _cloud_devices, creds)
