@@ -46,26 +46,45 @@
     padding: 2rem 1rem;
   }
 
-  .wizard {
-    width: 100%;
-    max-width: 720px;
-  }
+  .wizard { width: 100%; max-width: 720px; }
 
   h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: .25rem; }
-  .subtitle { color: var(--muted); font-size: .9rem; margin-bottom: 2rem; }
+  .subtitle { color: var(--muted); font-size: .9rem; margin-bottom: 1.5rem; }
+
+  /* Tab navigation */
+  .tabs {
+    display: flex;
+    gap: .25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: .3rem;
+    margin-bottom: 1.5rem;
+  }
+  .tab {
+    flex: 1;
+    padding: .55rem .75rem;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+    text-align: center;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    background: var(--accent);
+    color: #fff;
+  }
 
   /* Steps indicator */
-  .steps-bar {
-    display: flex;
-    gap: .5rem;
-    margin-bottom: 2rem;
-  }
+  .steps-bar { display: flex; gap: .5rem; margin-bottom: 2rem; }
   .step-dot {
-    flex: 1;
-    height: 4px;
-    border-radius: 4px;
-    background: var(--border);
-    transition: background .3s;
+    flex: 1; height: 4px; border-radius: 4px;
+    background: var(--border); transition: background .3s;
   }
   .step-dot.active { background: var(--accent); }
   .step-dot.done   { background: var(--ok); }
@@ -116,7 +135,9 @@
   .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .actions { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+  .btn-danger { background: var(--error); color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; }
 
   /* Camera table */
   table { width: 100%; border-collapse: collapse; font-size: .9rem; }
@@ -153,6 +174,7 @@
   .log-body .step { color: var(--muted); font-size: .8rem; }
   .log-line.ok    { border-color: var(--ok);    background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
   .log-line.error { border-color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--surface)); }
+  .log-line.warn  { border-color: var(--warn);  background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
 
   /* Alert banner */
   .alert { padding: .75rem 1rem; border-radius: 6px; font-size: .9rem; margin-bottom: 1rem; }
@@ -166,108 +188,232 @@
     margin-top: .5rem;
   }
   .copy-btn { font-size: .8rem; padding: .3rem .7rem; }
+
+  /* Removal camera list */
+  .cam-list { display: flex; flex-direction: column; gap: .5rem; }
+  .cam-item {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .6rem .9rem;
+    border: 1px solid var(--border); border-radius: 7px;
+    cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .cam-item:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+  .cam-item input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .cam-item .cam-slug { font-weight: 500; font-size: .95rem; }
+
+  /* Privacy / AdGuard section */
+  .privacy-status {
+    display: flex; align-items: center; gap: .75rem;
+    padding: 1rem; border-radius: 8px; margin-bottom: 1.25rem;
+    border: 1px solid var(--border); background: var(--bg);
+    font-size: .95rem;
+  }
+  .privacy-status.active {
+    border-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 8%, var(--surface));
+  }
+  .privacy-status.inactive {
+    border-color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 6%, var(--surface));
+  }
+  .privacy-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    background: var(--muted);
+  }
+  .privacy-dot.on  { background: var(--ok); }
+  .privacy-dot.off { background: var(--warn); }
+  .domain-list {
+    display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .75rem;
+  }
+  .domain-chip {
+    font-size: .75rem; font-family: monospace; padding: .2rem .5rem;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--muted);
+  }
+  .privacy-feedback {
+    padding: .6rem .9rem; border-radius: 6px; font-size: .85rem; margin-top: .75rem;
+  }
+  .privacy-feedback.ok    { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); color: var(--ok); border: 1px solid var(--ok); }
+  .privacy-feedback.error { background: color-mix(in srgb, var(--error) 10%, var(--surface)); color: var(--error); border: 1px solid var(--error); }
 </style>
 
 <div class="wizard">
   <h1>📷 eKaza Wizard</h1>
   <p class="subtitle">Provisionamento automático de câmeras eKaza no Home Assistant</p>
 
-  <div class="steps-bar">
-    <div class="step-dot active" id="dot-0"></div>
-    <div class="step-dot" id="dot-1"></div>
-    <div class="step-dot" id="dot-2"></div>
+  <div class="tabs">
+    <button class="tab active" data-tab="install" onclick="switchTab('install')">📷 Instalação</button>
+    <button class="tab" data-tab="remove" onclick="switchTab('remove')">🗑️ Remoção</button>
+    <button class="tab" data-tab="privacy" onclick="switchTab('privacy')">🔒 Privacidade</button>
   </div>
 
-  <!-- STEP 0: Credentials -->
-  <div id="step-0">
-    <div class="card">
-      <h2>Credenciais do projeto Tuya</h2>
-      <div class="row2">
-        <div class="field">
-          <label>Access ID (Client ID)</label>
-          <input id="access_id" placeholder="hkddgu7p5hj…" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Access Secret</label>
-          <input id="access_secret" type="password" placeholder="f44d4837…" autocomplete="off">
-        </div>
-      </div>
-      <div class="row2">
-        <div class="field">
-          <label>Região</label>
-          <select id="region">
-            <option value="us">us (Americas)</option>
-            <option value="eu">eu (Europe)</option>
-            <option value="cn">cn (China)</option>
-            <option value="in">in (India)</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Usuário RTSP (padrão: admin)</label>
-          <input id="rtsp_username" value="admin">
-        </div>
-      </div>
-      <div class="field">
-        <label>Senha RTSP padrão (definida no ONVIF do SmartLife)</label>
-        <input id="rtsp_password" type="password" placeholder="senha padrão para todas as câmeras">
-      </div>
-      <div id="discover-error" class="alert error" style="display:none"></div>
+  <!-- ════════════════════════════════════════════════ TAB: INSTALAÇÃO -->
+  <div id="tab-install">
+    <div class="steps-bar">
+      <div class="step-dot active" id="dot-0"></div>
+      <div class="step-dot" id="dot-1"></div>
+      <div class="step-dot" id="dot-2"></div>
     </div>
-    <div class="actions">
-      <span></span>
-      <button class="btn btn-primary" id="btn-discover" onclick="doDiscover()">
-        Descobrir câmeras →
-      </button>
-    </div>
-  </div>
 
-  <!-- STEP 1: Camera review -->
-  <div id="step-1" style="display:none">
+    <!-- STEP 0: Credentials -->
+    <div id="step-0">
+      <div class="card">
+        <h2>Credenciais do projeto Tuya</h2>
+        <div class="row2">
+          <div class="field">
+            <label>Access ID (Client ID)</label>
+            <input id="access_id" placeholder="hkddgu7p5hj…" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Access Secret</label>
+            <input id="access_secret" type="password" placeholder="f44d4837…" autocomplete="off">
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Região</label>
+            <select id="region">
+              <option value="us">us (Americas)</option>
+              <option value="eu">eu (Europe)</option>
+              <option value="cn">cn (China)</option>
+              <option value="in">in (India)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Usuário RTSP (padrão: admin)</label>
+            <input id="rtsp_username" value="admin">
+          </div>
+        </div>
+        <div class="field">
+          <label>Senha RTSP padrão (definida no ONVIF do SmartLife)</label>
+          <input id="rtsp_password" type="password" placeholder="senha padrão para todas as câmeras">
+        </div>
+        <div id="discover-error" class="alert error" style="display:none"></div>
+      </div>
+      <div class="actions">
+        <span></span>
+        <button class="btn btn-primary" id="btn-discover" onclick="doDiscover()">
+          Descobrir câmeras →
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 1: Camera review -->
+    <div id="step-1" style="display:none">
+      <div class="card">
+        <h2>Câmeras descobertas</h2>
+        <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">
+          Confirme os slugs (prefixo das entidades no HA) e ajuste senhas individuais se necessário.
+          Fixe os IPs no roteador pelo MAC antes de prosseguir.
+        </p>
+        <div id="cameras-table-wrap">
+          <div class="empty">Nenhuma câmera encontrada.</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" onclick="goStep(0)">← Voltar</button>
+        <button class="btn btn-primary" id="btn-provision" onclick="doProvision()">
+          Provisionar →
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 2: Progress -->
+    <div id="step-2" style="display:none">
+      <div class="card">
+        <h2>Provisionando…</h2>
+        <div class="log" id="log"></div>
+      </div>
+      <div id="frigate-snippet-card" class="card" style="display:none">
+        <h2>⚠️ Config do Frigate não encontrada automaticamente</h2>
+        <p style="font-size:.85rem;color:var(--muted);margin-bottom:.5rem">
+          Cole este bloco no seu arquivo de config do Frigate e reinicie o add-on:
+        </p>
+        <pre class="snippet" id="frigate-snippet"></pre>
+        <button class="btn btn-ghost copy-btn" onclick="copySnippet()">Copiar</button>
+      </div>
+      <div class="actions" id="step2-actions" style="display:none">
+        <span></span>
+        <button class="btn btn-primary" onclick="goStep(0)">Provisionar outra câmera</button>
+      </div>
+    </div>
+  </div><!-- /tab-install -->
+
+  <!-- ════════════════════════════════════════════════ TAB: REMOÇÃO -->
+  <div id="tab-remove" style="display:none">
     <div class="card">
-      <h2>Câmeras descobertas</h2>
+      <h2>Remover câmeras</h2>
       <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">
-        Confirme os slugs (prefixo das entidades no HA) e ajuste senhas individuais se necessário.
-        Fixe os IPs no roteador pelo MAC antes de prosseguir.
+        Selecione as câmeras a remover. As streams go2rtc, a config do Frigate e as entidades
+        LocalTuya correspondentes serão excluídas. O Frigate será reiniciado ao final.
       </p>
-      <div id="cameras-table-wrap">
-        <div class="empty">Nenhuma câmera encontrada.</div>
+      <div id="remove-cameras-list">
+        <div class="empty"><span class="spinner"></span></div>
       </div>
     </div>
     <div class="actions">
-      <button class="btn btn-ghost" onclick="goStep(0)">← Voltar</button>
-      <button class="btn btn-primary" id="btn-provision" onclick="doProvision()">
-        Provisionar →
+      <button class="btn btn-ghost" id="btn-reload-cams" onclick="loadRemoveCameras()">↻ Recarregar</button>
+      <button class="btn btn-danger" id="btn-remove" onclick="doRemove()" disabled>
+        Remover selecionadas
       </button>
     </div>
-  </div>
+    <div id="remove-log-card" class="card" style="display:none">
+      <h2 style="margin-bottom:.75rem">Removendo…</h2>
+      <div class="log" id="remove-log"></div>
+    </div>
+  </div><!-- /tab-remove -->
 
-  <!-- STEP 2: Progress -->
-  <div id="step-2" style="display:none">
+  <!-- ════════════════════════════════════════════════ TAB: PRIVACIDADE -->
+  <div id="tab-privacy" style="display:none">
     <div class="card">
-      <h2>Provisionando…</h2>
-      <div class="log" id="log"></div>
-    </div>
-    <div id="frigate-snippet-card" class="card" style="display:none">
-      <h2>⚠️ Config do Frigate não encontrada automaticamente</h2>
-      <p style="font-size:.85rem;color:var(--muted);margin-bottom:.5rem">
-        Cole este bloco no seu arquivo de config do Frigate e reinicie o add-on:
+      <h2>Bloqueio de nuvem eKaza / TUTK</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">
+        Bloqueia os servidores de nuvem usados pelas câmeras via regras no AdGuard Home,
+        impedindo que o firmware envie dados para fora da rede local.
+        O AdGuard será brevemente reiniciado para aplicar as alterações.
       </p>
-      <pre class="snippet" id="frigate-snippet"></pre>
-      <button class="btn btn-ghost copy-btn" onclick="copySnippet()">Copiar</button>
+
+      <div id="privacy-status-wrap">
+        <div class="privacy-status">
+          <span class="privacy-dot"></span>
+          <span><span class="spinner"></span> Verificando AdGuard…</span>
+        </div>
+      </div>
+
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem">Domínios bloqueados:</p>
+      <div class="domain-list" id="domain-list"></div>
+
+      <div id="privacy-feedback" style="display:none"></div>
+
+      <div style="display:flex;gap:.75rem;margin-top:1.25rem">
+        <button class="btn btn-primary" id="btn-adguard-enable" onclick="setAdguard(true)" style="display:none">
+          Ativar bloqueio
+        </button>
+        <button class="btn btn-ghost btn-danger" id="btn-adguard-disable" onclick="setAdguard(false)" style="display:none">
+          Desativar bloqueio
+        </button>
+        <button class="btn btn-ghost" onclick="loadAdguardStatus()">↻ Atualizar status</button>
+      </div>
     </div>
-    <div class="actions" id="step2-actions" style="display:none">
-      <span></span>
-      <button class="btn btn-primary" onclick="goStep(0)">Provisionar outra câmera</button>
-    </div>
-  </div>
-</div>
+  </div><!-- /tab-privacy -->
+</div><!-- /wizard -->
 
 <script>
   // ── State ────────────────────────────────────────────────────────────────
   let credentials = {};
   let cameras = [];
 
-  // ── Navigation ───────────────────────────────────────────────────────────
+  // ── Tab navigation ──────��─────────────────────────────────────────────────
+  function switchTab(name) {
+    ['install', 'remove', 'privacy'].forEach(t => {
+      document.getElementById(`tab-${t}`).style.display = t === name ? '' : 'none';
+      document.querySelector(`[data-tab="${t}"]`).classList.toggle('active', t === name);
+    });
+    if (name === 'remove')  loadRemoveCameras();
+    if (name === 'privacy') loadAdguardStatus();
+  }
+
+  // ── Installation wizard ───────────────────────────────────────────────────
   function goStep(n) {
     [0,1,2].forEach(i => {
       document.getElementById(`step-${i}`).style.display = i === n ? '' : 'none';
@@ -276,7 +422,6 @@
     });
   }
 
-  // ── Step 0: Discover ─────────────────────────────────────────────────────
   async function doDiscover() {
     const btn = document.getElementById('btn-discover');
     const errEl = document.getElementById('discover-error');
@@ -307,7 +452,6 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Erro desconhecido');
-
       cameras = data.cameras;
       renderCameraTable(cameras);
       goStep(1);
@@ -320,7 +464,6 @@
     }
   }
 
-  // ── Camera table ─────────────────────────────────────────────────────────
   function renderCameraTable(cams) {
     const wrap = document.getElementById('cameras-table-wrap');
     if (!cams.length) {
@@ -329,16 +472,10 @@
     }
     let html = `
       <table>
-        <thead>
-          <tr>
-            <th>Nome (SmartLife)</th>
-            <th>Slug (HA)</th>
-            <th>IP / MAC</th>
-            <th>Modelo</th>
-            <th>Status</th>
-            <th>Senha RTSP</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Nome (SmartLife)</th><th>Slug (HA)</th><th>IP / MAC</th>
+          <th>Modelo</th><th>Status</th><th>Senha RTSP</th>
+        </tr></thead>
         <tbody>
     `;
     cams.forEach((cam, i) => {
@@ -350,20 +487,15 @@
           <td>${cam.name}</td>
           <td><input class="slug-input" data-i="${i}" value="${cam.slug}"
                oninput="cameras[this.dataset.i].slug = this.value"></td>
-          <td>
-            ${cam.ip}
-            ${cam.mac ? `<br><span class="mac">${cam.mac}</span>` : ''}
-          </td>
+          <td>${cam.ip}${cam.mac ? `<br><span class="mac">${cam.mac}</span>` : ''}</td>
           <td>${modelBadge}</td>
           <td><span class="${cam.online ? 'badge-online' : 'badge-offline'}">
             ${cam.online ? '● online' : '○ offline'}
           </span></td>
-          <td>
-            <div class="pw-field">
-              <input type="password" value="${cam.rtsp_password}"
-                     data-i="${i}" oninput="cameras[this.dataset.i].rtsp_password = this.value">
-            </div>
-          </td>
+          <td><div class="pw-field">
+            <input type="password" value="${cam.rtsp_password}"
+                   data-i="${i}" oninput="cameras[this.dataset.i].rtsp_password = this.value">
+          </div></td>
         </tr>
       `;
     });
@@ -371,7 +503,6 @@
     wrap.innerHTML = html;
   }
 
-  // ── Step 2: Provision ────────────────────────────────────────────────────
   const STEP_LABELS = {
     onvif_setup:     'ONVIF — ativar + senha RTSP',
     frigate_config:  'Frigate — config de câmeras',
@@ -379,57 +510,38 @@
     localtuya:       'LocalTuya — config de entidades',
     reload_scripts:  'Recarregar scripts HA',
     restart_frigate: 'Reiniciar Frigate',
+    card_deploy:     'Card de controle eKaza',
     dashboard:       'Dashboard Lovelace',
     done:            'Concluído',
   };
 
-  const STEP_ICONS = {ok: '✅', error: '❌', running: '⏳', skip: '⏭️'};
+  const STEP_ICONS = {ok: '✅', error: '❌', running: '⏳', warn: '⚠️', skip: '⏭️'};
 
   async function doProvision() {
     goStep(2);
     const log = document.getElementById('log');
     log.innerHTML = '';
+    document.getElementById('frigate-snippet-card').style.display = 'none';
+    document.getElementById('step2-actions').style.display = 'none';
 
-    const body = JSON.stringify({credentials, cameras});
     const res = await fetch('api/provision', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body,
+      body: JSON.stringify({credentials, cameras}),
     });
 
     const lines = {};
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, {stream: true});
-      const parts = buf.split('\n\n');
-      buf = parts.pop();
-      for (const part of parts) {
-        const line = part.replace(/^data: /, '').trim();
-        if (!line) continue;
-        try {
-          const ev = JSON.parse(line);
-          processEvent(ev, log, lines);
-        } catch {}
-      }
-    }
-
+    await readSSE(res, ev => processProvisionEvent(ev, log, lines));
     document.getElementById('step2-actions').style.display = '';
   }
 
-  function processEvent(ev, log, lines) {
+  function processProvisionEvent(ev, log, lines) {
     const {camera, step, status, detail} = ev;
     const key = `${camera}__${step}`;
     const label = STEP_LABELS[step] || step;
     const camLabel = camera === 'global' ? '' : camera;
 
     if (step === 'frigate_config' && status === 'error' && detail.includes('Add manually')) {
-      // show snippet card
       const snippetMatch = detail.match(/Add manually:\n\n([\s\S]+)/);
       if (snippetMatch) {
         document.getElementById('frigate-snippet').textContent = snippetMatch[1];
@@ -440,9 +552,7 @@
     if (lines[key]) {
       lines[key].className = `log-line ${status}`;
       lines[key].querySelector('.log-icon').textContent = STEP_ICONS[status] || '•';
-      if (detail && status !== 'running') {
-        lines[key].querySelector('.step').textContent = detail;
-      }
+      if (detail && status !== 'running') lines[key].querySelector('.step').textContent = detail;
       return;
     }
 
@@ -461,11 +571,215 @@
   }
 
   function copySnippet() {
-    const text = document.getElementById('frigate-snippet').textContent;
-    navigator.clipboard.writeText(text).catch(() => {});
+    navigator.clipboard.writeText(document.getElementById('frigate-snippet').textContent).catch(() => {});
   }
 
-  // ── Auto-load saved config on page start ─────────────────────────────────
+  // ── Removal tab ─────────────────────────────���─────────────────────────────
+  async function loadRemoveCameras() {
+    const list = document.getElementById('remove-cameras-list');
+    const btn  = document.getElementById('btn-remove');
+    list.innerHTML = '<div class="empty"><span class="spinner"></span> Carregando…</div>';
+    btn.disabled = true;
+
+    try {
+      const res  = await fetch('api/cameras');
+      const data = await res.json();
+      const slugs = data.cameras || [];
+
+      if (!slugs.length) {
+        list.innerHTML = '<div class="empty">Nenhuma câmera configurada no Frigate.</div>';
+        return;
+      }
+
+      list.innerHTML = `<div class="cam-list">${
+        slugs.map(s => `
+          <label class="cam-item">
+            <input type="checkbox" value="${s}" onchange="updateRemoveBtn()">
+            <span class="cam-slug">${s}</span>
+          </label>
+        `).join('')
+      }</div>`;
+    } catch (e) {
+      list.innerHTML = `<div class="empty" style="color:var(--error)">Erro: ${e.message}</div>`;
+    }
+  }
+
+  function updateRemoveBtn() {
+    const checked = document.querySelectorAll('#remove-cameras-list input:checked').length;
+    document.getElementById('btn-remove').disabled = checked === 0;
+  }
+
+  async function doRemove() {
+    const checked = [...document.querySelectorAll('#remove-cameras-list input:checked')].map(el => el.value);
+    if (!checked.length) return;
+
+    const btn = document.getElementById('btn-remove');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Removendo…';
+
+    const logCard = document.getElementById('remove-log-card');
+    const log = document.getElementById('remove-log');
+    logCard.style.display = '';
+    log.innerHTML = '';
+
+    const REMOVE_LABELS = {
+      go2rtc:          'go2rtc streams',
+      frigate:         'Frigate config',
+      localtuya:       'Entidades LocalTuya',
+      frigate_save:    'Salvar config Frigate',
+      restart_frigate: 'Reiniciar Frigate',
+      done:            'Concluído',
+    };
+
+    const res = await fetch('api/remove', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cameras: checked}),
+    });
+
+    const lines = {};
+    await readSSE(res, ev => {
+      const {step, name, ok, detail} = ev;
+      if (step === 'done') {
+        addLogLine(log, lines, 'done__done', '✅', '', REMOVE_LABELS.done || 'Concluído', detail, 'ok');
+        return;
+      }
+      const key = `${name}__${step}`;
+      const label = REMOVE_LABELS[step] || step;
+      const camLabel = name === 'global' ? '' : name;
+      const status = ok ? 'ok' : 'error';
+      if (lines[key]) {
+        lines[key].className = `log-line ${status}`;
+        lines[key].querySelector('.log-icon').textContent = ok ? '✅' : '❌';
+        lines[key].querySelector('.step').textContent = detail || '';
+        return;
+      }
+      addLogLine(log, lines, key, ok ? '✅' : '❌', camLabel, label, detail || '', status);
+    });
+
+    btn.disabled = false;
+    btn.innerHTML = 'Remover selecionadas';
+    await loadRemoveCameras();
+  }
+
+  function addLogLine(log, lines, key, icon, cam, label, detail, status) {
+    const el = document.createElement('div');
+    el.className = `log-line ${status}`;
+    el.innerHTML = `
+      <span class="log-icon">${icon}</span>
+      <div class="log-body">
+        ${cam ? `<span class="cam">${cam}</span> — ` : ''}<span>${label}</span>
+        <div class="step">${detail}</div>
+      </div>
+    `;
+    log.appendChild(el);
+    lines[key] = el;
+    el.scrollIntoView({block: 'nearest'});
+  }
+
+  // ── Privacy tab ───────────────────────────────────────────────────────────
+  const BLOCK_DOMAINS = ['tutk.com','iotcplatform.com','avservices.io','p2ptunnell.com','gwipc.com','yosee.com'];
+
+  async function loadAdguardStatus() {
+    const wrap = document.getElementById('privacy-status-wrap');
+    wrap.innerHTML = `<div class="privacy-status">
+      <span class="privacy-dot"></span>
+      <span><span class="spinner"></span> Verificando AdGuard…</span>
+    </div>`;
+    document.getElementById('btn-adguard-enable').style.display  = 'none';
+    document.getElementById('btn-adguard-disable').style.display = 'none';
+    document.getElementById('privacy-feedback').style.display = 'none';
+
+    // Populate domain chips once
+    const domainList = document.getElementById('domain-list');
+    if (!domainList.children.length) {
+      domainList.innerHTML = BLOCK_DOMAINS.map(d =>
+        `<span class="domain-chip">${d}</span>`
+      ).join('');
+    }
+
+    try {
+      const res  = await fetch('api/adguard/status');
+      const data = await res.json();
+      renderAdguardStatus(data);
+    } catch (e) {
+      wrap.innerHTML = `<div class="privacy-status inactive">
+        <span class="privacy-dot off"></span>
+        <span style="color:var(--error)">Erro ao verificar: ${e.message}</span>
+      </div>`;
+    }
+  }
+
+  function renderAdguardStatus(data) {
+    const wrap = document.getElementById('privacy-status-wrap');
+    const active = data.active;
+
+    if (!data.accessible) {
+      wrap.innerHTML = `<div class="privacy-status inactive">
+        <span class="privacy-dot off"></span>
+        <span><strong>AdGuard indisponível</strong> — ${data.message || ''}</span>
+      </div>`;
+      return;
+    }
+
+    wrap.innerHTML = `<div class="privacy-status ${active ? 'active' : 'inactive'}">
+      <span class="privacy-dot ${active ? 'on' : 'off'}"></span>
+      <span>
+        <strong>${active ? 'Bloqueio ativo' : 'Bloqueio inativo'}</strong>
+        ${data.message ? ` — ${data.message}` : ''}
+      </span>
+    </div>`;
+
+    document.getElementById('btn-adguard-enable').style.display  = active ? 'none' : '';
+    document.getElementById('btn-adguard-disable').style.display = active ? '' : 'none';
+  }
+
+  async function setAdguard(enable) {
+    const btnEn  = document.getElementById('btn-adguard-enable');
+    const btnDis = document.getElementById('btn-adguard-disable');
+    const fb = document.getElementById('privacy-feedback');
+    btnEn.disabled = btnDis.disabled = true;
+    btnEn.innerHTML = btnDis.innerHTML = '<span class="spinner"></span>';
+    fb.style.display = 'none';
+
+    try {
+      const res  = await fetch(`api/adguard/${enable ? 'enable' : 'disable'}`, {method:'POST'});
+      const data = await res.json();
+      fb.className = `privacy-feedback ${data.ok ? 'ok' : 'error'}`;
+      fb.textContent = data.detail;
+      fb.style.display = '';
+      await loadAdguardStatus();
+    } catch (e) {
+      fb.className = 'privacy-feedback error';
+      fb.textContent = `Erro: ${e.message}`;
+      fb.style.display = '';
+    } finally {
+      btnEn.disabled = btnDis.disabled = false;
+      btnEn.innerHTML  = 'Ativar bloqueio';
+      btnDis.innerHTML = 'Desativar bloqueio';
+    }
+  }
+
+  // ── SSE reader utility ────────────────────────────────────────────────────
+  async function readSSE(res, handler) {
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.replace(/^data: /, '').trim();
+        if (!line) continue;
+        try { handler(JSON.parse(line)); } catch {}
+      }
+    }
+  }
+
+  // ── Auto-load saved config on page start ──────────────────────────────────
   (async () => {
     try {
       const res = await fetch('api/config');

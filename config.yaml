@@ -1,6 +1,6 @@
 name: "eKaza Wizard"
 description: "Provisioning wizard — discovers eKaza cameras from Tuya, configures Frigate, LocalTuya, PTZ scripts and dashboard automatically."
-version: "0.2.0"
+version: "0.3.0"
 slug: "ekaza_wizard"
 init: false
 arch:

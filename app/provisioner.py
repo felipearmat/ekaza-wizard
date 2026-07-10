@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 
 import tinytuya
 
+import card_deployer
 import dashboard
 import frigate
 import ha_client
@@ -29,7 +30,7 @@ async def _get_frigate_slug() -> str:
     if not slug:
         raise RuntimeError(
             "Add-on Frigate não encontrado automaticamente. "
-            "Configure FRIGATE_SLUG nas opções do add-on (ex: ccab4aaf_frigate)."
+            "Configure FRIGATE_SLUG nas opções do add-on (ex: a1b2c3d4_frigate)."
         )
     _frigate_slug = slug
     return _frigate_slug
@@ -97,6 +98,10 @@ async def provision_all(cameras: list[CameraInfo]) -> AsyncGenerator[str, None]:
     yield _event("global", "restart_frigate", "running")
     ok = await ha_client.addon_restart(frigate_slug)
     yield _event("global", "restart_frigate", "ok" if ok else "error")
+
+    yield _event("global", "card_deploy", "running")
+    ok, detail = await card_deployer.deploy()
+    yield _event("global", "card_deploy", "ok" if ok else "warn", detail)
 
     yield _event("global", "dashboard", "running")
     ok, detail = await dashboard.update_dashboard(cameras, _FRIGATE_URL)

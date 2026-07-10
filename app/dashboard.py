@@ -9,7 +9,7 @@ _VIEW_ICON = "mdi:cctv"
 
 def _card(cam: CameraInfo, frigate_host: str) -> dict:
     return {
-        "type": "custom:security-camera-card",
+        "type": "custom:ekaza-control-card",
         "entity": f"camera.{cam.slug}",
         "name": cam.name,
         "frigate_host": frigate_host,

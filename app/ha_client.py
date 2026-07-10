@@ -121,9 +121,46 @@ async def lovelace_save_config(config: dict) -> bool:
     return await with_websocket(_action)
 
 
+async def lovelace_register_resource(url: str) -> bool:
+    async def _action(ws, next_id):
+        r = await _ws_send_recv(ws, next_id(), "lovelace/resources")
+        if r.get("success"):
+            if any(res.get("url") == url for res in r.get("result", [])):
+                return True  # already registered
+        r = await _ws_send_recv(ws, next_id(), "lovelace/resources/create",
+                                res_type="module", url=url)
+        return r.get("success", False)
+
+    return await with_websocket(_action)
+
+
 async def reload_scripts() -> bool:
     try:
         await call_service("script", "reload")
         return True
     except Exception:
         return False
+
+
+async def remove_localtuya_by_host(ips: list[str]) -> int:
+    """Remove LocalTuya config entries whose host IP is in the given list."""
+    removed = 0
+
+    async def _action(ws, next_id):
+        nonlocal removed
+        r = await _ws_send_recv(ws, next_id(), "config_entries/get", domain="localtuya")
+        if not r.get("success"):
+            return
+        for entry in r.get("result", []):
+            host = (entry.get("data") or {}).get("host", "")
+            if host in ips:
+                r2 = await _ws_send_recv(ws, next_id(), "config_entries/remove",
+                                         entry_id=entry["entry_id"])
+                if r2.get("success"):
+                    removed += 1
+
+    try:
+        await with_websocket(_action)
+    except Exception:
+        pass
+    return removed

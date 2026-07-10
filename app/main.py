@@ -10,11 +10,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+import adguard
 import discovery
 import frigate
 import motion_bridge
 import provisioner
-from models import CameraInfo, DiscoverRequest, ProvisionRequest
+import remover
+from models import CameraInfo, DiscoverRequest, ProvisionRequest, RemoveRequest
 
 _HERE = Path(__file__).parent
 _FRIGATE_URL = f"http://localhost:{os.environ.get('FRIGATE_PORT', '5000')}"
@@ -85,6 +87,52 @@ async def api_provision(req: ProvisionRequest):
             _bridge.notify_provisioned([c.model_dump() for c in req.cameras])
 
     return EventSourceResponse(_stream())
+
+
+@app.get("/api/cameras")
+async def api_cameras():
+    """Return list of camera slugs currently configured in Frigate."""
+    try:
+        frigate_slug = await provisioner._get_frigate_slug()
+    except RuntimeError:
+        return {"cameras": []}
+    cameras = await remover.list_cameras(frigate_slug)
+    return {"cameras": cameras}
+
+
+@app.post("/api/remove")
+async def api_remove(req: RemoveRequest):
+    """SSE stream — removes selected cameras from Frigate and LocalTuya."""
+    async def _stream() -> AsyncGenerator[str, None]:
+        try:
+            frigate_slug = await provisioner._get_frigate_slug()
+        except RuntimeError as e:
+            import json
+            yield f"data: {json.dumps({'step':'init','name':'global','ok':False,'detail':str(e)})}\n\n"
+            return
+        async for chunk in remover.remove(req.cameras, frigate_slug):
+            yield chunk
+
+    return EventSourceResponse(_stream())
+
+
+@app.get("/api/adguard/status")
+async def api_adguard_status():
+    accessible, msg = await adguard.check_accessible()
+    status = await adguard.get_status()
+    return {**status, "accessible": accessible, "message": msg}
+
+
+@app.post("/api/adguard/enable")
+async def api_adguard_enable():
+    ok, detail = await adguard.add_block_rules()
+    return {"ok": ok, "detail": detail}
+
+
+@app.post("/api/adguard/disable")
+async def api_adguard_disable():
+    ok, detail = await adguard.remove_block_rules()
+    return {"ok": ok, "detail": detail}
 
 
 @app.get("/api/health")

@@ -42,3 +42,7 @@ class StepResult(BaseModel):
 class CameraResult(BaseModel):
     camera: str
     steps: list[StepResult] = Field(default_factory=list)
+
+
+class RemoveRequest(BaseModel):
+    cameras: list[str]
