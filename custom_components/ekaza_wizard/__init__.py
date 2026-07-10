@@ -138,7 +138,7 @@ class EkazaDiscoverView(HomeAssistantView):
             return self.json({"error": "Credenciais Tuya obrigatórias"}, status_code=400)
 
         try:
-            cameras = await discovery.discover(creds)
+            cameras = await discovery.discover(creds, hass=self._hass)
             return self.json({"cameras": [c.model_dump() for c in cameras]})
         except Exception as exc:
             _LOGGER.exception("Discovery failed")
