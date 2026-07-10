@@ -1,6 +1,8 @@
 # eKaza Wizard
 
-Add-on para Home Assistant OS que automatiza o provisionamento completo de câmeras **eKaza**[www.ekaza.com.br] em um stack local com Frigate + LocalTuya — do scan de rede até o dashboard, sem editar arquivos manualmente.
+Add-on para Home Assistant OS que automatiza o provisionamento completo de câmeras **[eKaza](https://www.ekaza.com.br)** em um stack local com Frigate + LocalTuya — do scan de rede até o dashboard, sem editar arquivos manualmente.
+
+> ⚠️ **As câmeras eKaza devem ser adicionadas pelo aplicativo [Smart Life](https://www.tuya.com/app) (disponível para Android e iOS), e NÃO pelo aplicativo eKaza.** O wizard usa a API Tuya vinculada à conta Smart Life para descobrir os dispositivos e obter as chaves locais necessárias para o controle local.
 
 ---
 
@@ -27,10 +29,13 @@ Add-on para Home Assistant OS que automatiza o provisionamento completo de câme
 
 ## Credenciais Tuya (obrigatórias)
 
-1. Acesse [iot.tuya.com](https://iot.tuya.com) e crie um projeto em **Cloud → Development → Create Cloud Project**
-2. Anote o **Access ID** e o **Access Secret**
-3. Em **Devices → Link Tuya App Account**, vincule sua conta do Smart Life
-4. Confirme a **região** onde seus dispositivos estão registrados (`us`, `eu`, `cn` ou `in`)
+> 📖 **Tutorial passo a passo:** [Como criar uma conta de desenvolvedor Tuya e vincular ao Smart Life](https://developer.tuya.com/en/docs/iot/quick-start1?id=K95ztz9u9t89n)
+
+1. Acesse [iot.tuya.com](https://iot.tuya.com) — crie uma conta gratuita de desenvolvedor se ainda não tiver
+2. Crie um projeto em **Cloud → Development → Create Cloud Project** (escolha tipo **Smart Home**)
+3. Anote o **Access ID** e o **Access Secret** exibidos na aba **Overview** do projeto
+4. Em **Devices → Link Tuya App Account**, vincule sua conta do **Smart Life** (escaneie o QR code com o app)
+5. Confirme a **região** onde seus dispositivos estão registrados (`us`, `eu`, `cn` ou `in`)
 
 ---
 
@@ -143,11 +148,34 @@ smart-life.com  smartlifeapp.com  fogcloud.io  nebulae-iot.com
 
 ## Câmeras compatíveis
 
-| Modelo | Product ID Tuya | Testado |
-|---|---|---|
-| eKaza EKRW-T5293 (dome PTZ) | `wg808xnwx1zeavq2` | ✅ |
+| Modelo | Tipo | Product ID Tuya | Status |
+|---|---|---|---|
+| eKaza EKRW-T5293 | Dome PTZ | `wg808xnwx1zeavq2` | ✅ Testado |
+| eKaza EKRW-T5394 | Dome PTZ | — | 🔄 Aguardando product_id |
+| eKaza EKGD-T4117 | Câmera externa | — | 🔄 Aguardando product_id |
+| eKaza EKGD-T5530 | Câmera externa | — | 🔄 Aguardando product_id |
+| eKaza EKGD-T2233 | Câmera externa | — | 🔄 Aguardando product_id |
+| eKaza EKJS-T3188 | Câmera interna | — | 🔄 Aguardando product_id |
+| eKaza EKJS-T3169 | Câmera interna | — | 🔄 Aguardando product_id |
 
-Para adicionar suporte a outros modelos eKaza, inclua o `product_id` em `app/constants.py` (`EKAZA_PRODUCT_IDS`) e mapeie os DPs em `EKAZA_ENTITIES`.
+> **Como obter o product_id de um modelo novo:** adicione a câmera ao Smart Life, acesse [iot.tuya.com](https://iot.tuya.com) → **Cloud → Devices**, localize o dispositivo e anote o campo `Product ID`. Abra uma [issue](https://github.com/felipearmat/ekaza-wizard/issues) com o modelo e o product_id para que ele seja adicionado ao wizard.
+
+Para modelos com product_id mapeado, o wizard busca automaticamente os DPs na Tuya Cloud na primeira descoberta.
+
+---
+
+## Screenshots
+
+<table>
+<tr>
+  <td align="center"><b>Aba Instalar — descoberta de câmeras</b><br><img src="screenshots/install.png" alt="Aba Instalar" width="420"></td>
+  <td align="center"><b>Log de provisionamento em tempo real</b><br><img src="screenshots/provision-log.png" alt="Log de provisionamento" width="420"></td>
+</tr>
+<tr>
+  <td align="center"><b>Aba Remover</b><br><img src="screenshots/remove.png" alt="Aba Remover" width="420"></td>
+  <td align="center"><b>Aba Privacidade — bloqueio AdGuard</b><br><img src="screenshots/privacy.png" alt="Aba Privacidade" width="420"></td>
+</tr>
+</table>
 
 ---
 
