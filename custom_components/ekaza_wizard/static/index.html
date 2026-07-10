@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>eKaza Wizard</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --card: #0f3460;
+    --accent: #e94560; --accent2: #4ecca3;
+    --text: #eaeaea; --text-dim: #a0a0b0;
+    --ok: #4ecca3; --err: #e94560; --warn: #f5a623;
+    --border: #2a2a4a; --radius: 8px; --font: 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+  /* ── Operation banner ── */
+  #op-banner {
+    display: none;
+    position: sticky; top: 0; z-index: 200;
+    background: var(--warn); color: #0a0a0a;
+    padding: 10px 20px;
+    font-weight: 700; font-size: 0.9rem;
+    text-align: center;
+    border-bottom: 2px solid #d4891b;
+    animation: pulse-bg 2s ease-in-out infinite;
+  }
+  #op-banner.remove-mode { background: var(--err); border-color: #c03040; animation: pulse-bg-red 2s ease-in-out infinite; }
+  @keyframes pulse-bg     { 0%,100%{background:var(--warn);}  50%{background:#ffd07a;} }
+  @keyframes pulse-bg-red { 0%,100%{background:var(--err);}   50%{background:#ff7b90;} }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+  .card h2 { font-size: 1rem; color: var(--accent2); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .step-num { background: var(--card); color: var(--text); border-radius: 50%; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media(max-width:600px) { .grid2 { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.9rem; outline: none; }
+  input:focus, select:focus { border-color: var(--accent2); }
+  .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: opacity .2s; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary   { background: var(--accent);  color: #fff; }
+  .btn-danger    { background: rgba(233,69,96,.15); color: var(--err); border: 1px solid var(--err); }
+  .btn-danger:hover { background: var(--err); color: #fff; }
+  .btn-confirm   { background: var(--err); color: #fff; }
+  .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  .btn-success   { background: var(--ok); color: #0a0a1a; }
+  .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+  .tab-btn {
+    padding: 9px 22px; border: 1px solid var(--border);
+    border-bottom: none; border-radius: 4px 4px 0 0;
+    background: var(--surface); color: var(--text-dim);
+    cursor: pointer; font-size: 0.88rem; font-weight: 600;
+    position: relative; bottom: -1px; transition: all .15s;
+  }
+  .tab-btn:hover { color: var(--accent2); border-color: var(--accent2); }
+  .tab-btn.active { background: var(--bg); color: var(--text); border-color: var(--border); border-bottom-color: var(--bg); }
+  .tab-btn.tab-danger.active { color: var(--err); }
+
+  /* ── Dependency check ── */
+  .dep-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+  .dep-row:last-child { border-bottom: none; }
+  .dep-icon { flex-shrink: 0; width: 20px; text-align: center; }
+  .dep-label { font-weight: 600; min-width: 170px; }
+  .dep-msg { color: var(--text-dim); }
+  .dep-ok  { color: var(--ok); }
+  .dep-err { color: var(--err); }
+
+  /* ── Camera table (provision) ── */
+  .cam-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 12px; }
+  .cam-table th { text-align: left; padding: 8px 12px; background: var(--card); color: var(--text-dim); font-weight: 600; }
+  .cam-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .cam-table tr:last-child td { border-bottom: none; }
+  .cam-table tr:hover td { background: rgba(255,255,255,.03); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .badge-ok  { background: rgba(78,204,163,.15);  color: var(--ok); }
+  .badge-off { background: rgba(233,69,96,.15);   color: var(--err); }
+  .badge-dim { background: rgba(160,160,176,.1);  color: var(--text-dim); }
+
+  /* ── Installed cameras list (remove tab) ── */
+  .inst-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .inst-row:last-child { border-bottom: none; }
+  .inst-info { flex: 1; min-width: 0; }
+  .inst-name { font-weight: 600; font-size: 0.92rem; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inst-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8rem; color: var(--text-dim); }
+  .inst-meta code { background: var(--card); padding: 1px 6px; border-radius: 4px; font-size: 0.78rem; }
+  .inst-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  /* ── Progress log (shared style) ── */
+  .progress-ticker {
+    display: none; align-items: center; gap: 8px;
+    padding: 8px 12px; margin-bottom: 8px;
+    background: rgba(78,204,163,.08);
+    border: 1px solid rgba(78,204,163,.2);
+    border-radius: 4px; font-size: 0.83rem; color: var(--accent2);
+  }
+  .progress-ticker.remove-mode { background: rgba(233,69,96,.08); border-color: rgba(233,69,96,.2); color: var(--err); }
+  .progress-pill {
+    display: none; margin-left: auto;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 2px 10px;
+    font-size: 0.75rem; color: var(--text-dim);
+  }
+  #log, #remove-log {
+    background: #0a0a1a; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px; font-family: monospace; font-size: 0.82rem;
+    max-height: 380px; overflow-y: auto;
+  }
+  .log-line { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.04); display: flex; gap: 8px; align-items: flex-start; }
+  .log-line:last-child { border-bottom: none; }
+  .log-icon { flex-shrink: 0; }
+  .log-cam  { color: var(--accent2); font-weight: 600; }
+  .log-ok   { color: var(--ok); }
+  .log-err  { color: var(--err); }
+  .log-info { color: var(--text-dim); }
+
+  /* ── Warning modal ── */
+  #warning-overlay {
+    display: none; position: fixed; inset: 0; z-index: 500;
+    background: rgba(0,0,0,.65); align-items: center; justify-content: center; padding: 16px;
+  }
+  #warning-overlay.open { display: flex; }
+  #warning-modal {
+    background: var(--surface); border: 2px solid var(--warn);
+    border-radius: var(--radius); max-width: 460px; width: 100%; padding: 24px;
+    animation: fadeIn .2s ease;
+  }
+  #warning-modal h3 { color: var(--warn); margin-bottom: 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+  #warning-modal p { font-size: 0.85rem; color: var(--text); line-height: 1.7; margin-bottom: 20px; }
+
+  /* ── Animations ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { display: inline-block; animation: spin .7s linear infinite; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .fade-in { animation: fadeIn .25s ease; }
+  .hidden { display: none !important; }
+  #section-cameras.locked, #section-provision.locked { opacity: .4; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<!-- ── SmartLife active warning modal ── -->
+<div id="warning-overlay">
+  <div id="warning-modal">
+    <h3>⚠️ Bloqueio SmartLife ativo</h3>
+    <p>
+      As regras de bloqueio Tuya/SmartLife estão <strong>ativas</strong> no AdGuard Home.<br><br>
+      Enquanto ativas, não será possível adicionar novos dispositivos via SmartLife
+      na mesma rede. Para parear novos dispositivos, acesse a aba
+      <strong>🛡️ Privacidade</strong> e remova temporariamente as regras.
+    </p>
+    <div class="actions" style="margin-top:0">
+      <button class="btn btn-primary" onclick="document.getElementById('warning-overlay').classList.remove('open')">
+        OK, entendi
+      </button>
+      <button class="btn btn-secondary" onclick="switchTab('privacy');document.getElementById('warning-overlay').classList.remove('open')">
+        🛡️ Ir para Privacidade
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Operation banner ── -->
+<div id="op-banner">
+  <span class="spin">⏳</span>&nbsp;
+  <span id="op-banner-text">Operação em andamento — <strong>NÃO feche nem recarregue esta página</strong></span>
+</div>
+
+<div class="container">
+  <h1>eKaza <span>Wizard</span></h1>
+  <p class="subtitle">Configuração automática de câmeras PTZ — Frigate + LocalTuya + Dashboard</p>
+
+  <!-- ── Tab navigation ── -->
+  <div class="tabs">
+    <button class="tab-btn active"  id="tab-btn-install"  onclick="switchTab('install')">📥 Instalar</button>
+    <button class="tab-btn tab-danger" id="tab-btn-remove" onclick="switchTab('remove')">🗑️ Remover</button>
+    <button class="tab-btn"         id="tab-btn-privacy" onclick="switchTab('privacy')">🛡️ Privacidade</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!--  INSTALL TAB                                           -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div id="tab-install">
+
+    <!-- STEP 0: Dependency check -->
+    <div class="card" id="section-deps">
+      <h2>🔍 Pré-requisitos</h2>
+      <div id="deps-list">
+        <p style="color:var(--text-dim);font-size:.85rem">
+          <span class="spin">⏳</span> Verificando dependências…
+        </p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary btn-sm" onclick="doCheck()">🔄 Verificar novamente</button>
+      </div>
+    </div>
+
+    <!-- STEP 1: Credentials -->
+    <div class="card" id="section-creds">
+      <h2><span class="step-num">1</span> Credenciais Tuya</h2>
+      <div class="grid2">
+        <div>
+          <label>Access ID</label>
+          <input id="access-id" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxx">
+        </div>
+        <div>
+          <label>Access Secret</label>
+          <input id="access-secret" type="password" placeholder="xxxxxxxxxxxxxxxxxxxxxxxx">
+        </div>
+        <div>
+          <label>Região</label>
+          <select id="region">
+            <option value="us">US (padrão)</option>
+            <option value="eu">EU</option>
+            <option value="in">IN</option>
+            <option value="cn">CN</option>
+          </select>
+        </div>
+        <div>
+          <label>Senha RTSP (para as câmeras)</label>
+          <input id="rtsp-pwd" type="password" placeholder="SenhaForte123!">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="btn-discover" onclick="doDiscover()">
+          🔍 Descobrir Câmeras
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 2: Dashboard target -->
+    <div class="card" id="section-dashboard">
+      <h2><span class="step-num">2</span> Dashboard de Destino</h2>
+      <p style="font-size:0.83rem; color:var(--text-dim); margin-bottom:14px; line-height:1.5;">
+        Escolha em qual dashboard o card da câmera será adicionado após o provisionamento.
+      </p>
+      <label for="dashboard-select">Dashboard</label>
+      <select id="dashboard-select">
+        <option value="">⏳ Carregando dashboards…</option>
+      </select>
+      <p id="dashboard-hint" style="margin-top:8px; font-size:0.78rem; color:var(--text-dim); line-height:1.4;"></p>
+    </div>
+
+    <!-- STEP 3: Camera list -->
+    <div class="card locked" id="section-cameras">
+      <h2><span class="step-num">3</span> Câmeras Encontradas</h2>
+      <div id="cam-list-wrap">
+        <p style="color:var(--text-dim);font-size:.85rem">Nenhuma câmera encontrada ainda.</p>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-secondary" id="btn-recheck"   onclick="doDiscover()" disabled>🔄 Re-escanear</button>
+        <button class="btn btn-success"   id="btn-provision" onclick="doProvision()" disabled>⚡ Provisionar Selecionadas</button>
+      </div>
+    </div>
+
+    <!-- STEP 4: Provisioning log -->
+    <div class="card locked" id="section-provision">
+      <h2>
+        <div id="progress-header">
+          <span class="step-num">4</span> Progresso
+          <span class="progress-pill" id="progress-pill"></span>
+        </div>
+      </h2>
+      <div class="progress-ticker" id="active-step">
+        <span class="spin">⚙</span>
+        <span id="active-step-label">Iniciando…</span>
+      </div>
+      <div id="log"><span class="log-info">Aguardando início do provisionamento…</span></div>
+    </div>
+
+  </div><!-- /tab-install -->
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!--  REMOVE TAB                                            -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div id="tab-remove" class="hidden">
+
+    <!-- Installed cameras list -->
+    <div class="card" id="section-installed">
+      <h2>📷 Câmeras Instaladas</h2>
+      <div id="installed-list">
+        <p style="color:var(--text-dim);font-size:.85rem">
+          <span class="spin">⏳</span> Carregando câmeras instaladas…
+        </p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadInstalledCameras()">🔄 Atualizar lista</button>
+      </div>
+    </div>
+
+    <!-- Removal progress log -->
+    <div class="card hidden" id="section-remove-log">
+      <h2>
+        <span>🗑️ Removendo</span>
+        <span class="progress-pill" id="remove-pill" style="margin-left:auto"></span>
+      </h2>
+      <div class="progress-ticker remove-mode" id="remove-ticker">
+        <span class="spin">⚙</span>
+        <span id="remove-ticker-label">Iniciando remoção…</span>
+      </div>
+      <div id="remove-log"><span class="log-info">Aguardando…</span></div>
+    </div>
+
+  </div><!-- /tab-remove -->
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!--  PRIVACY TAB                                           -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div id="tab-privacy" class="hidden">
+
+    <div class="card">
+      <h2>🛡️ Bloqueio SmartLife / Tuya</h2>
+
+      <!-- Status indicator -->
+      <div id="privacy-status-wrap" style="display:flex;align-items:center;gap:14px;padding:14px;background:var(--card);border-radius:6px;border:1px solid var(--border);margin-bottom:16px;">
+        <span id="privacy-status-icon" style="font-size:1.6rem;flex-shrink:0">⏳</span>
+        <div style="flex:1">
+          <div id="privacy-status-label" style="font-weight:700;font-size:0.95rem">Verificando…</div>
+          <div id="privacy-status-detail" style="font-size:0.8rem;color:var(--text-dim);margin-top:3px"></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="loadSmartLifeStatus()" title="Atualizar status">🔄</button>
+      </div>
+
+      <!-- Description + warning -->
+      <p style="font-size:0.83rem;color:var(--text-dim);margin-bottom:12px;line-height:1.6;">
+        Bloqueia o envio de imagens e eventos das câmeras para servidores Tuya/SmartLife via AdGuard Home,
+        limitando a comunicação à rede local.
+      </p>
+      <div style="font-size:0.8rem;background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.3);border-radius:6px;padding:10px 14px;line-height:1.6;margin-bottom:16px;">
+        ⚠️ <strong>Atenção:</strong> Enquanto as regras estiverem ativas, não será possível adicionar novos
+        dispositivos via SmartLife na mesma rede. Remova temporariamente para parear novos dispositivos.
+      </div>
+
+      <!-- Domain list -->
+      <details style="margin-bottom:18px">
+        <summary style="cursor:pointer;font-size:0.82rem;color:var(--text-dim);user-select:none;padding:4px 0">
+          Domínios bloqueados (9) ▾
+        </summary>
+        <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">tuya.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">tuyaeu.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">tuyacn.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">tuyaus.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">tuyain.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">smart-life.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">smartlifeapp.com</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">fogcloud.io</code>
+          <code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.78rem">nebulae-iot.com</code>
+        </div>
+      </details>
+
+      <!-- Action buttons -->
+      <div class="actions">
+        <button class="btn btn-primary" id="btn-block-smartlife" onclick="doSmartLifeAction('block')">🔒 Ativar bloqueio</button>
+        <button class="btn btn-danger"  id="btn-unblock-smartlife" onclick="doSmartLifeAction('unblock')">🔓 Remover bloqueio</button>
+      </div>
+      <p style="margin-top:8px;font-size:0.78rem;color:var(--text-dim)">
+        ⏱ Cada operação leva ~40s e reinicia o AdGuard brevemente.
+      </p>
+
+      <!-- Progress ticker -->
+      <div class="progress-ticker hidden" id="privacy-ticker" style="margin-top:16px">
+        <span class="spin">⚙</span>
+        <span id="privacy-ticker-label">Iniciando…</span>
+      </div>
+
+      <!-- Operation log -->
+      <div id="privacy-log" class="hidden" style="background:#0a0a1a;border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:monospace;font-size:0.82rem;max-height:200px;overflow-y:auto;margin-top:12px;"></div>
+    </div>
+
+  </div><!-- /tab-privacy -->
+
+</div><!-- /container -->
+
+<script>
+const API = '/api/ekaza_wizard';
+let _cameras    = [];
+let _busy       = false;
+let _stepCount  = 0;
+
+// ── Prevent accidental navigation ───────────────────────────────────────────
+window.addEventListener('beforeunload', e => {
+  if (_busy) {
+    e.preventDefault();
+    return (e.returnValue = 'Operação em andamento. Tem certeza que quer sair?');
+  }
+});
+
+function setBusy(active, mode) {
+  _busy = active;
+  const banner = document.getElementById('op-banner');
+  banner.style.display = active ? 'block' : 'none';
+  banner.classList.toggle('remove-mode', mode === 'remove');
+  const txt = document.getElementById('op-banner-text');
+  if (mode === 'remove')
+    txt.innerHTML = '⚠️ Remoção em andamento — <strong>NÃO feche nem recarregue esta página</strong>';
+  else
+    txt.innerHTML = 'Provisionamento em andamento — <strong>NÃO feche nem recarregue esta página</strong>';
+}
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  ['install', 'remove', 'privacy'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+    document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === tab);
+  });
+  if (tab === 'remove')  loadInstalledCameras();
+  if (tab === 'privacy') loadSmartLifeStatus();
+}
+
+// ── Dependency check ─────────────────────────────────────────────────────────
+async function doCheck() {
+  const list = document.getElementById('deps-list');
+  list.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem"><span class="spin">⏳</span> Verificando…</p>';
+  try {
+    const r    = await fetch(`${API}/check`);
+    const data = await r.json();
+    list.innerHTML = Object.values(data).map(d => `
+      <div class="dep-row fade-in">
+        <span class="dep-icon ${d.ok ? 'dep-ok' : 'dep-err'}">${d.ok ? '✔' : '✘'}</span>
+        <span class="dep-label">${esc(d.label)}</span>
+        <span class="dep-msg">${esc(d.msg)}</span>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--err)">Erro ao verificar: ${esc(e.message)}</p>`;
+  }
+}
+
+// ── Config pre-fill ──────────────────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const r = await fetch(`${API}/config`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.tuya_access_id)     document.getElementById('access-id').value     = d.tuya_access_id;
+    if (d.tuya_access_secret) document.getElementById('access-secret').value = d.tuya_access_secret;
+    if (d.tuya_region)        document.getElementById('region').value         = d.tuya_region;
+    if (d.rtsp_password)      document.getElementById('rtsp-pwd').value       = d.rtsp_password;
+  } catch (_) {}
+}
+
+function getCredentials() {
+  return {
+    access_id:             document.getElementById('access-id').value.trim(),
+    access_secret:         document.getElementById('access-secret').value.trim(),
+    region:                document.getElementById('region').value,
+    default_rtsp_password: document.getElementById('rtsp-pwd').value,
+    rtsp_username:         'admin',
+  };
+}
+
+function unlock(id) { document.getElementById(id).classList.remove('locked'); }
+
+// ── Dashboards ───────────────────────────────────────────────────────────────
+async function loadDashboards() {
+  const sel  = document.getElementById('dashboard-select');
+  const hint = document.getElementById('dashboard-hint');
+  try {
+    const r = await fetch(`${API}/dashboards`);
+    const data = await r.json();
+    const dashes = data.dashboards || [];
+    const opts = ['<option value="">— Não adicionar a nenhum dashboard —</option>'];
+    opts.push(...dashes.map(d => `<option value="${esc(d.url_path)}">${esc(d.title)}</option>`));
+    sel.innerHTML = opts.join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">— Não adicionar a nenhum dashboard —</option>';
+  }
+  updateDashboardHint();
+  sel.addEventListener('change', updateDashboardHint);
+}
+
+function updateDashboardHint() {
+  const sel  = document.getElementById('dashboard-select');
+  const hint = document.getElementById('dashboard-hint');
+  if (!hint) return;
+  hint.textContent = sel.value
+    ? `O card será adicionado ao dashboard "${sel.options[sel.selectedIndex].text}".`
+    : 'Nenhum card será adicionado ao dashboard. Você pode adicionar manualmente depois.';
+}
+
+// ── Discover ─────────────────────────────────────────────────────────────────
+async function doDiscover() {
+  const btn = document.getElementById('btn-discover');
+  btn.disabled = true; btn.textContent = '⏳ Descobrindo…';
+  try {
+    const creds = getCredentials();
+    if (!creds.access_id || !creds.access_secret) {
+      alert('Preencha o Access ID e Secret antes de continuar.'); return;
+    }
+    const r    = await fetch(`${API}/discover`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({credentials: creds}),
+    });
+    const data = await r.json();
+    if (data.error) { alert(`Erro: ${data.error}`); return; }
+    _cameras = data.cameras || [];
+    renderCameras();
+    unlock('section-cameras');
+    document.getElementById('btn-recheck').disabled  = false;
+    document.getElementById('btn-provision').disabled = !_cameras.length;
+    unlock('section-provision');
+  } catch (e) {
+    alert(`Erro de rede: ${e.message}`);
+  } finally {
+    btn.disabled = false; btn.textContent = '🔍 Descobrir Câmeras';
+  }
+}
+
+function renderCameras() {
+  const wrap = document.getElementById('cam-list-wrap');
+  if (!_cameras.length) {
+    wrap.innerHTML = '<p style="color:var(--err)">Nenhuma câmera encontrada. Verifique as credenciais e a rede local.</p>';
+    return;
+  }
+  const rows = _cameras.map((c,i) => `
+    <tr>
+      <td><input type="checkbox" class="cam-cb" data-idx="${i}" checked></td>
+      <td>${esc(c.name)}</td>
+      <td><code>${esc(c.slug)}</code></td>
+      <td><code>${esc(c.ip)}</code></td>
+      <td><span class="badge ${c.online?'badge-ok':'badge-off'}">${c.online?'Online':'Offline'}</span></td>
+    </tr>`).join('');
+  wrap.innerHTML = `
+    <table class="cam-table">
+      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function getSelected() {
+  return Array.from(document.querySelectorAll('.cam-cb:checked'))
+              .map(cb => _cameras[+cb.dataset.idx]);
+}
+
+// ── Provision ────────────────────────────────────────────────────────────────
+const STEP_LABELS = {
+  onvif:          'Habilitando ONVIF',
+  frigate:        'Gerando config Frigate',
+  localtuya:      'Configurando LocalTuya',
+  scripts:        'Gerando scripts PTZ',
+  reload_scripts: 'Recarregando scripts',
+  restart_frigate:'Reiniciando Frigate',
+  dashboard:      'Atualizando dashboard',
+  motion_bridge:  'Iniciando bridge',
+};
+
+async function doProvision() {
+  const selected = getSelected();
+  if (!selected.length) { alert('Selecione pelo menos uma câmera.'); return; }
+  const rtspPwd = document.getElementById('rtsp-pwd').value;
+  if (!rtspPwd) { alert('Defina a senha RTSP antes de provisionar.'); return; }
+
+  const btn = document.getElementById('btn-provision');
+  btn.disabled = true; btn.textContent = '⏳ Provisionando…';
+  setBusy(true, 'install');
+  _stepCount = 0;
+
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+
+  const cameras = selected.map(c => ({...c, rtsp_password: rtspPwd, rtsp_username: 'admin'}));
+  const dashboardPath = document.getElementById('dashboard-select').value || null;
+  const total = cameras.length * 4 + 5;
+  updatePill('progress-pill', 0, total);
+
+  try {
+    const r = await fetch(`${API}/provision`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        credentials: getCredentials(), cameras,
+        dashboard_path: dashboardPath,
+      }),
+    });
+    const reader  = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const blocks = buf.split('\n\n');
+      buf = blocks.pop();
+      for (const blk of blocks) parseSSE(blk, log, total, 'install');
+    }
+    if (buf.trim()) parseSSE(buf, log, total, 'install');
+  } catch (e) {
+    appendLog(log, '❌', '', `Erro de rede: ${e.message}`, false);
+  } finally {
+    btn.disabled = false; btn.textContent = '⚡ Provisionar Selecionadas';
+    setBusy(false);
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+function updatePill(pillId, current, total) {
+  const pill = document.getElementById(pillId);
+  if (!pill) return;
+  pill.textContent = `${current} / ${total}`;
+  pill.style.display = 'inline-block';
+}
+
+function parseSSE(block, log, total, mode) {
+  let event = 'message', dataStr = '';
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    if (line.startsWith('data:'))  dataStr = line.slice(5).trim();
+  }
+  if (!dataStr) return;
+  try { handleEvent(event, JSON.parse(dataStr), log, total, mode); } catch (_) {}
+}
+
+function handleEvent(event, d, log, total, mode) {
+  if (mode === 'remove') {
+    handleRemoveEvent(event, d, log, total); return;
+  }
+  // install mode
+  const activeEl = document.getElementById('active-step');
+  const activeLabel = document.getElementById('active-step-label');
+  if (event === 'start') {
+    activeEl.style.display = 'flex';
+    appendLog(log, '🚀', '', `Iniciando — ${d.cameras} câmera(s)`, true);
+    activeLabel.textContent = 'Habilitando ONVIF…';
+    return;
+  }
+  if (event === 'done') {
+    _stepCount = total;
+    updatePill('progress-pill', total, total);
+    activeLabel.textContent = 'Concluído!';
+    appendLog(log, '✅', '', `Concluído! Câmeras: ${d.cameras.join(', ')}`, true);
+    return;
+  }
+  if (event === 'step') {
+    _stepCount++;
+    updatePill('progress-pill', _stepCount, total);
+    const cam  = d.camera ? `[${d.camera}] ` : '';
+    appendLog(log, d.ok ? '✔' : '✘', cam, `${d.step}: ${d.detail || ''}`, d.ok);
+    const nextSteps = {
+      onvif:                      'Salvando config Frigate…',
+      frigate:                    'Configurando LocalTuya…',
+      localtuya:                  'Gerando scripts PTZ…',
+      scripts:                    'Criando boolean de motion bridge…',
+      motion_bridge_boolean:      'Recarregando scripts…',
+      reload_scripts:             'Aguardando Frigate reiniciar…',
+      reload_frigate_integration: 'Atualizando dashboard…',
+      dashboard:                  'Iniciando motion bridge…',
+      motion_bridge:              'Concluindo…',
+    };
+    if (nextSteps[d.step]) activeLabel.textContent = nextSteps[d.step];
+  }
+}
+
+function appendLog(log, icon, cam, msg, ok) {
+  const div = document.createElement('div');
+  div.className = 'log-line fade-in';
+  const cls = ok ? 'log-ok' : 'log-err';
+  div.innerHTML = `
+    <span class="log-icon ${cls}">${icon}</span>
+    ${cam ? `<span class="log-cam">${esc(cam)}</span>` : ''}
+    <span>${esc(msg)}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  REMOVE TAB
+// ════════════════════════════════════════════════════════════════════════════
+
+let _installedCameras = [];
+let _removeBusy = false;
+let _removeSteps = 0;
+let _privacyBusy = false;
+let _firstStatusLoad = true;
+const REMOVE_TOTAL_STEPS = 8; // bridge, frigate_config, reload_frigate_integration, scripts, reload_scripts, localtuya, motion_bridge_boolean, dashboard
+
+async function loadInstalledCameras() {
+  const list = document.getElementById('installed-list');
+  list.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem"><span class="spin">⏳</span> Carregando…</p>';
+  try {
+    const r = await fetch(`${API}/cameras`);
+    const data = await r.json();
+    _installedCameras = data.cameras || [];
+    renderInstalledCameras();
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--err)">Erro ao carregar: ${esc(e.message)}</p>`;
+  }
+}
+
+function renderInstalledCameras() {
+  const list = document.getElementById('installed-list');
+  if (!_installedCameras.length) {
+    list.innerHTML = `<p style="color:var(--text-dim);font-size:.85rem">
+      Nenhuma câmera encontrada no Frigate. Instale câmeras primeiro na aba Instalar.
+    </p>`;
+    return;
+  }
+  list.innerHTML = _installedCameras.map((cam, i) => `
+    <div class="inst-row fade-in" id="cam-row-${i}">
+      <div class="inst-info">
+        <div class="inst-name">${esc(cam.name)}</div>
+        <div class="inst-meta">
+          <code>${esc(cam.slug)}</code>
+          ${cam.ip ? `<code>${esc(cam.ip)}</code>` : ''}
+          <span class="badge badge-ok">Frigate</span>
+          <span class="badge ${cam.has_localtuya ? 'badge-ok' : 'badge-dim'}">${cam.has_localtuya ? 'LocalTuya ✓' : 'LocalTuya ?'}</span>
+          <span class="badge ${cam.has_scripts   ? 'badge-ok' : 'badge-dim'}">${cam.has_scripts   ? 'Scripts PTZ ✓' : 'Scripts PTZ ?'}</span>
+        </div>
+      </div>
+      <div class="inst-actions" id="cam-actions-${i}">
+        <button class="btn btn-sm btn-danger" onclick="confirmRemove(${i})">🗑️ Remover</button>
+      </div>
+    </div>`).join('');
+}
+
+function confirmRemove(idx) {
+  const actions = document.getElementById(`cam-actions-${idx}`);
+  const cam = _installedCameras[idx];
+  actions.innerHTML = `
+    <span style="font-size:.8rem;color:var(--warn);margin-right:4px">⚠️ Confirmar?</span>
+    <button class="btn btn-sm btn-confirm" onclick="doRemove(${idx})">Sim, remover</button>
+    <button class="btn btn-sm btn-secondary" onclick="cancelRemove(${idx})">Cancelar</button>`;
+}
+
+function cancelRemove(idx) {
+  const actions = document.getElementById(`cam-actions-${idx}`);
+  actions.innerHTML = `<button class="btn btn-sm btn-danger" onclick="confirmRemove(${idx})">🗑️ Remover</button>`;
+}
+
+async function doRemove(idx) {
+  if (_removeBusy) { alert('Aguarde a remoção atual terminar.'); return; }
+  const cam = _installedCameras[idx];
+  if (!cam) return;
+
+  // Disable all remove buttons during operation
+  _removeBusy = true;
+  setBusy(true, 'remove');
+  document.querySelectorAll('.btn-danger, .btn-confirm').forEach(b => b.disabled = true);
+
+  // Show and reset log section
+  const logSection = document.getElementById('section-remove-log');
+  const log        = document.getElementById('remove-log');
+  logSection.classList.remove('hidden');
+  log.innerHTML = '';
+  document.getElementById('remove-ticker').style.display = 'flex';
+  document.getElementById('remove-ticker-label').textContent = `Removendo ${cam.name}…`;
+  document.getElementById('remove-pill').style.display = 'inline-block';
+  updatePill('remove-pill', 0, REMOVE_TOTAL_STEPS);
+  logSection.scrollIntoView({behavior: 'smooth', block: 'start'});
+
+  _removeSteps = 0;
+
+  try {
+    const r = await fetch(`${API}/remove`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({slug: cam.slug, device_id: cam.device_id || null}),
+    });
+    const reader  = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const blocks = buf.split('\n\n');
+      buf = blocks.pop();
+      for (const blk of blocks) parseSSE(blk, log, REMOVE_TOTAL_STEPS, 'remove');
+    }
+    if (buf.trim()) parseSSE(buf, log, REMOVE_TOTAL_STEPS, 'remove');
+  } catch (e) {
+    appendLog(log, '❌', '', `Erro de rede: ${e.message}`, false);
+  } finally {
+    _removeBusy = false;
+    setBusy(false);
+    document.getElementById('remove-ticker').style.display = 'none';
+    log.scrollTop = log.scrollHeight;
+    // Refresh camera list
+    await loadInstalledCameras();
+  }
+}
+
+const REMOVE_STEP_LABELS = {
+  bridge:                     'Removendo do Frigate…',
+  frigate_config:             'Aguardando Frigate reiniciar…',
+  reload_frigate_integration: 'Removendo scripts PTZ…',
+  scripts:                    'Recarregando scripts…',
+  reload_scripts:             'Removendo do LocalTuya…',
+  localtuya:                  'Removendo motion bridge…',
+  motion_bridge_boolean:      'Removendo do dashboard…',
+  dashboard:                  'Concluindo…',
+};
+
+function handleRemoveEvent(event, d, log, total) {
+  const ticker = document.getElementById('remove-ticker-label');
+  if (event === 'start') {
+    appendLog(log, '🗑️', '', `Iniciando remoção: ${d.name} (${d.slug})`, true);
+    return;
+  }
+  if (event === 'done') {
+    updatePill('remove-pill', total, total);
+    ticker.textContent = 'Concluído!';
+    appendLog(log, '✅', '', `Remoção concluída: ${d.name}`, true);
+    return;
+  }
+  if (event === 'step') {
+    _removeSteps++;
+    updatePill('remove-pill', _removeSteps, total);
+    appendLog(log, d.ok ? '✔' : '✘', '', `${d.step}: ${d.detail || ''}`, d.ok);
+    if (REMOVE_STEP_LABELS[d.step]) ticker.textContent = REMOVE_STEP_LABELS[d.step];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PRIVACY TAB — SmartLife blocking management
+// ════════════════════════════════════════════════════════════════════════════
+
+async function loadSmartLifeStatus() {
+  const icon   = document.getElementById('privacy-status-icon');
+  const label  = document.getElementById('privacy-status-label');
+  const detail = document.getElementById('privacy-status-detail');
+  icon.textContent  = '⏳';
+  label.textContent = 'Verificando…';
+  label.style.color = '';
+  detail.textContent = '';
+  try {
+    const r = await fetch(`${API}/adguard/status`);
+    const d = await r.json();
+    if (d.active) {
+      icon.textContent   = '✅';
+      label.textContent  = 'Regras ativas';
+      label.style.color  = 'var(--ok)';
+      detail.textContent = `${d.domains} domínios Tuya/SmartLife bloqueados`;
+      if (_firstStatusLoad) document.getElementById('warning-overlay').classList.add('open');
+    } else {
+      icon.textContent   = '⚪';
+      label.textContent  = 'Sem regras de bloqueio';
+      label.style.color  = 'var(--text-dim)';
+      detail.textContent = d.source === 'unknown'
+        ? 'Status desconhecido — ative ou remova as regras para atualizar'
+        : 'Câmeras podem enviar dados para servidores Tuya/SmartLife';
+    }
+    _firstStatusLoad = false;
+  } catch (e) {
+    icon.textContent   = '❓';
+    label.textContent  = 'Erro ao verificar status';
+    label.style.color  = 'var(--err)';
+    detail.textContent = e.message;
+  }
+}
+
+async function doSmartLifeAction(action) {
+  if (_busy || _privacyBusy) { alert('Aguarde a operação atual terminar.'); return; }
+
+  const ticker      = document.getElementById('privacy-ticker');
+  const tickerLabel = document.getElementById('privacy-ticker-label');
+  const log         = document.getElementById('privacy-log');
+  const btnBlock    = document.getElementById('btn-block-smartlife');
+  const btnUnblock  = document.getElementById('btn-unblock-smartlife');
+  const isBlock     = action === 'block';
+
+  _privacyBusy = true;
+  setBusy(true, 'install');
+  btnBlock.disabled   = true;
+  btnUnblock.disabled = true;
+  ticker.classList.remove('hidden');
+  log.classList.remove('hidden');
+  log.innerHTML = '';
+  tickerLabel.textContent = isBlock ? 'Ativando bloqueio SmartLife…' : 'Removendo regras SmartLife…';
+
+  try {
+    const r = await fetch(`${API}/adguard/${action}`, {method: 'POST'});
+    const reader  = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const blocks = buf.split('\n\n'); buf = blocks.pop();
+      for (const blk of blocks) {
+        let event = 'message', dataStr = '';
+        for (const line of blk.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          if (line.startsWith('data:'))  dataStr = line.slice(5).trim();
+        }
+        if (!dataStr) continue;
+        try {
+          const d = JSON.parse(dataStr);
+          if (event === 'step') {
+            appendLog(log, d.ok ? '✔' : '✘', '', d.detail || d.step, d.ok);
+            tickerLabel.textContent = d.ok ? 'Concluído!' : 'Erro — verifique o log';
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    appendLog(log, '❌', '', `Erro de rede: ${e.message}`, false);
+  } finally {
+    _privacyBusy = false;
+    setBusy(false);
+    btnBlock.disabled   = false;
+    btnUnblock.disabled = false;
+    ticker.classList.add('hidden');
+    await loadSmartLifeStatus();
+  }
+}
+
+function _fallbackCopyText(text, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  try { document.execCommand('copy'); cb(); } catch (e) { alert('Selecione o texto e pressione Ctrl+C para copiar.'); }
+  document.body.removeChild(ta);
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+loadConfig();
+loadDashboards();
+doCheck();
+loadSmartLifeStatus();
+</script>
+</body>
+</html>

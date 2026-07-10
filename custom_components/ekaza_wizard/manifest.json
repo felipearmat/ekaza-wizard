@@ -1,0 +1,11 @@
+{
+  "domain": "ekaza_wizard",
+  "name": "eKaza Wizard",
+  "version": "0.3.0",
+  "documentation": "https://github.com/felipearmat/ekaza-wizard",
+  "requirements": ["tinytuya>=1.15.0"],
+  "dependencies": ["frontend"],
+  "codeowners": ["@felipearmat"],
+  "iot_class": "local_push",
+  "config_flow": true
+}

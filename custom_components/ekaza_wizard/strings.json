@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "eKaza Wizard",
+        "description": "O wizard será instalado como painel no menu lateral. Após confirmar, acesse-o em **eKaza Wizard** na barra lateral.",
+        "data": {
+          "tuya_access_id": "Tuya Access ID",
+          "tuya_access_secret": "Tuya Access Secret",
+          "tuya_region": "Região Tuya",
+          "rtsp_password": "Senha RTSP padrão das câmeras"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "eKaza Wizard já está configurado."
+    },
+    "error": {
+      "cannot_connect": "Não foi possível conectar ao Tuya Cloud."
+    }
+  }
+}

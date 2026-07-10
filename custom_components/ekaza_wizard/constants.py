@@ -1,0 +1,58 @@
+"""Fallback entity list for eKaza EKRW-T5293 (product_id wg808xnwx1zeavq2).
+
+Used by localtuya_flow when schema_store has no match.
+"""
+
+EKAZA_ENTITIES = [
+    # --- switches ---
+    {"dp": 101, "platform": "switch", "friendly_name": "LED Indicador",           "is_passive": False},
+    {"dp": 103, "platform": "switch", "friendly_name": "Imagem Espelhada",        "is_passive": False},
+    {"dp": 104, "platform": "switch", "friendly_name": "OSD",                     "is_passive": False},
+    {"dp": 105, "platform": "switch", "friendly_name": "Modo Privacidade",        "is_passive": False},
+    {"dp": 107, "platform": "switch", "friendly_name": "WDR (Contraste)",         "is_passive": False},
+    {"dp": 111, "platform": "switch", "friendly_name": "Formatar SD",             "is_passive": False},
+    {"dp": 116, "platform": "switch", "friendly_name": "PTZ Parar",               "is_passive": True},
+    {"dp": 120, "platform": "switch", "friendly_name": "Sirene Automática",       "is_passive": False},
+    {"dp": 132, "platform": "switch", "friendly_name": "PTZ Home",                "is_passive": True},
+    {"dp": 134, "platform": "switch", "friendly_name": "Detecção de Movimento",   "is_passive": False},
+    {"dp": 138, "platform": "switch", "friendly_name": "Luz de Iluminação",       "is_passive": False},
+    {"dp": 139, "platform": "switch", "friendly_name": "Detecção de Áudio",       "is_passive": False},
+    {"dp": 150, "platform": "switch", "friendly_name": "Gravação SD",             "is_passive": False},
+    {"dp": 161, "platform": "switch", "friendly_name": "Rastreamento Automático", "is_passive": False},
+    {"dp": 162, "platform": "switch", "friendly_name": "Reiniciar Câmera",        "is_passive": False},
+    {"dp": 164, "platform": "switch", "friendly_name": "Zoom Parar",              "is_passive": True},
+    {"dp": 168, "platform": "switch", "friendly_name": "Zona de Movimento",       "is_passive": False},
+    {"dp": 170, "platform": "switch", "friendly_name": "Filtro Humano",           "is_passive": False},
+    {"dp": 198, "platform": "switch", "friendly_name": "Contorno de Objetos",     "is_passive": False},
+    {"dp": 236, "platform": "switch", "friendly_name": "Alarme Sonoro",           "is_passive": False},
+    {"dp": 237, "platform": "switch", "friendly_name": "ONVIF",                   "is_passive": False},
+    # --- selects ---
+    {"dp": 106, "platform": "select", "friendly_name": "Sensibilidade Movimento",
+     "select_options": {"0": "Baixa", "1": "Média", "2": "Alta"}},
+    {"dp": 119, "platform": "select", "friendly_name": "Controle PTZ",
+     "select_options": {"0": "Cima", "1": "Cima B", "2": "Direita", "3": "Esquerda",
+                        "4": "Baixo", "5": "Baixo B", "6": "Esquerda B", "7": "Direita B"}},
+    {"dp": 124, "platform": "select", "friendly_name": "Visão Noturna",
+     "select_options": {"auto": "Auto", "ir_mode": "IR", "color_mode": "Cor"}},
+    {"dp": 127, "platform": "select", "friendly_name": "Tipo de Evento",
+     "select_options": {"motion": "Movimento", "decibel": "Áudio", "humanoid": "Humano"}},
+    {"dp": 140, "platform": "select", "friendly_name": "Sensibilidade de Áudio",
+     "select_options": {"0": "Baixa", "1": "Média", "2": "Alta"}},
+    {"dp": 151, "platform": "select", "friendly_name": "Modo de Gravação",
+     "select_options": {"1": "Evento", "2": "Contínuo"}},
+    {"dp": 163, "platform": "select", "friendly_name": "Zoom",
+     "select_options": {"0": "Zoom Out", "1": "Zoom In"}},
+    {"dp": 178, "platform": "select", "friendly_name": "Ponto de Memória PTZ",
+     "select_options": {"0": "Ponto 1", "1": "Ponto 2", "2": "Ponto 3", "3": "Ponto 4"}},
+    {"dp": 188, "platform": "select", "friendly_name": "Anti-Oscilação",
+     "select_options": {"0": "Auto", "1": "50 Hz", "2": "60 Hz"}},
+    {"dp": 190, "platform": "select", "friendly_name": "Ir para Preset",
+     "select_options": {"1": "Preset 1", "2": "Preset 2", "3": "Preset 3", "4": "Preset 4"}},
+    {"dp": 199, "platform": "select", "friendly_name": "Salvar Preset",
+     "select_options": {"1": "Preset 1", "2": "Preset 2", "3": "Preset 3", "4": "Preset 4"}},
+    # --- numbers ---
+    {"dp": 160, "platform": "number", "friendly_name": "Volume",
+     "min_value": 1.0, "max_value": 10.0, "step_size": 1.0},
+    {"dp": 231, "platform": "number", "friendly_name": "Nível de Zoom",
+     "min_value": 0.0, "max_value": 10.0, "step_size": 1.0},
+]
