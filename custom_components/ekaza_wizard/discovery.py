@@ -1,10 +1,14 @@
-"""Camera discovery: Tuya Cloud API (primary) + local UDP scan (IP enrichment)."""
+"""Camera discovery: UDP scan + per-device Tuya Cloud lookup."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import re
+import time
 
+import requests
 import tinytuya
 
 from . import schema_store
@@ -12,66 +16,72 @@ from .models import CameraInfo, TuyaCredentials
 
 _LOGGER = logging.getLogger(__name__)
 
+_TUYA_BASE = {
+    "us": "https://openapi.tuyaus.com",
+    "eu": "https://openapi.tuyaeu.com",
+    "in": "https://openapi.tuyain.com",
+    "cn": "https://openapi.tuyacn.com",
+}
+
 
 def _slug(name: str) -> str:
     s = re.sub(r"^(c[aâ]mera|cam)\s*[-_]?\s*", "", name.lower()).strip()
     return re.sub(r"[^a-z0-9]+", "_", s).strip("_") or "camera"
 
 
-def _cloud_devices(creds: TuyaCredentials, hint_device_id: str = "") -> list[dict]:
-    """Return all Tuya devices in the account using tinytuya.Cloud.
-
-    hint_device_id: any known device_id from the account (e.g. from LocalTuya).
-    tinytuya uses it to resolve the Smart Life app user's uid, which is required
-    to list all devices. Without it, only devices visible to the developer account
-    are returned (usually none).
-    """
-    try:
-        cloud = tinytuya.Cloud(
-            apiRegion=creds.region,
-            apiKey=creds.access_id,
-            apiSecret=creds.access_secret,
-            apiDeviceID=hint_device_id or None,
-        )
-        raw = cloud.getdevices()
-    except Exception as exc:
-        _LOGGER.warning("tinytuya.Cloud.getdevices() failed: %s", exc)
-        return []
-
-    if isinstance(raw, list):
-        devices = raw
-    elif isinstance(raw, dict):
-        devices = raw.get("result", {}).get("list", raw.get("list", []))
+def _tuya_get(base: str, path: str, access_id: str, secret: str, token: str | None = None) -> dict:
+    now = int(time.time() * 1000)
+    sha256_body = hashlib.sha256(b"").hexdigest()
+    headers: dict = {}
+    if token is None:
+        payload = access_id + str(now)
+        headers["secret"] = secret
     else:
-        devices = []
+        payload = access_id + token + str(now)
+    payload += f"GET\n{sha256_body}\n\n/{path.lstrip('/')}"
+    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest().upper()
+    headers.update({"client_id": access_id, "t": str(now),
+                    "sign_method": "HMAC-SHA256", "sign": sig, "mode": "cors"})
+    if token:
+        headers["access_token"] = token
+    try:
+        return requests.get(base + path, headers=headers, timeout=10).json()
+    except Exception:
+        return {}
 
-    _LOGGER.debug("Tuya Cloud returned %d device(s)", len(devices))
-    if not devices:
-        _LOGGER.warning("No devices returned from Tuya Cloud (hint_device_id=%r)", hint_device_id)
+
+def _cloud_devices(creds: TuyaCredentials) -> list[dict]:
+    base = _TUYA_BASE.get(creds.region, _TUYA_BASE["us"])
+
+    token_r = _tuya_get(base, "/v1.0/token?grant_type=1", creds.access_id, creds.access_secret)
+    if not token_r.get("success"):
+        _LOGGER.warning("Tuya token fetch failed: %s", token_r)
         return []
+    token = token_r["result"]["access_token"]
 
-    # Enrich with local IPs via UDP scan (best-effort — may fail in containers)
-    local: dict[str, dict] = {}
+    devices = []
     try:
         scan = tinytuya.deviceScan(verbose=False, maxretry=4)
+        _LOGGER.debug("UDP scan returned %d device(s)", len(scan) if isinstance(scan, dict) else 0)
         if isinstance(scan, dict):
-            for info in scan.values():
+            for _ip_key, info in scan.items():
                 dev_id = info.get("gwId") or info.get("id", "")
-                if dev_id:
-                    local[dev_id] = info
-        _LOGGER.debug("UDP scan found %d local device(s)", len(local))
+                if not dev_id:
+                    continue
+                r = _tuya_get(base, f"/v1.0/iot-03/devices/{dev_id}",
+                              creds.access_id, creds.access_secret, token)
+                if r.get("success") and isinstance(r.get("result"), dict):
+                    d = r["result"]
+                    d["ip"] = info.get("ip", "")
+                    d["mac"] = info.get("mac", "")
+                    d["online"] = True
+                    devices.append(d)
+                else:
+                    _LOGGER.debug("Device %s cloud lookup: %s", dev_id[:8], r)
     except Exception as exc:
-        _LOGGER.debug("UDP scan skipped (normal in container): %s", exc)
+        _LOGGER.warning("Cloud device lookup failed: %s", exc)
 
-    for dev in devices:
-        dev_id = dev.get("id", "")
-        if dev_id in local:
-            dev["ip"] = local[dev_id].get("ip", dev.get("ip", ""))
-            dev["mac"] = local[dev_id].get("mac", dev.get("mac", ""))
-        else:
-            dev.setdefault("ip", "")
-            dev.setdefault("mac", "")
-
+    _LOGGER.debug("Discovery found %d device(s) total", len(devices))
     return devices
 
 
@@ -79,19 +89,7 @@ async def discover(creds: TuyaCredentials, hass=None) -> list[CameraInfo]:
     loop = asyncio.get_running_loop()
     creds_dict = {"region": creds.region, "access_id": creds.access_id, "access_secret": creds.access_secret}
 
-    # Use a known device_id from LocalTuya as seed for tinytuya uid resolution
-    hint_device_id = ""
-    if hass:
-        for entry in hass.config_entries.async_entries("localtuya"):
-            for dev_id in entry.data.get("devices", {}).keys():
-                hint_device_id = dev_id
-                break
-            if hint_device_id:
-                break
-        if hint_device_id:
-            _LOGGER.debug("Using LocalTuya device as uid seed: %s", hint_device_id[:8] + "...")
-
-    devices = await loop.run_in_executor(None, _cloud_devices, creds, hint_device_id)
+    devices = await loop.run_in_executor(None, _cloud_devices, creds)
 
     cameras, seen = [], {}
     for dev in devices:
