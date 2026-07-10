@@ -1,6 +1,6 @@
 # eKaza Wizard
 
-Add-on para Home Assistant OS que automatiza o provisionamento completo de câmeras **eKaza EKRW-T5293** (dome PTZ) em um stack local com Frigate + LocalTuya — do scan de rede até o dashboard, sem editar arquivos manualmente.
+Add-on para Home Assistant OS que automatiza o provisionamento completo de câmeras **eKaza**[www.ekaza.com.br] em um stack local com Frigate + LocalTuya — do scan de rede até o dashboard, sem editar arquivos manualmente.
 
 ---
 
