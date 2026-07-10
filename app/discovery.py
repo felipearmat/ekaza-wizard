@@ -17,13 +17,18 @@ def _to_slug(name: str) -> str:
 
 
 def _cloud_devices(creds: TuyaCredentials) -> list[dict]:
+    """List devices via the endpoint that works with the free Tuya IoT plan."""
     cloud = tinytuya.Cloud(
         apiRegion=creds.region,
         apiKey=creds.access_id,
         apiSecret=creds.access_secret,
         apiDeviceID="wizard",
     )
-    return cloud.getdevices() or []
+    r = cloud.cloudrequest("/v1.0/iot-01/associated-users/devices?page_size=100", "GET")
+    result = r.get("result", {})
+    if isinstance(result, dict):
+        return result.get("devices", [])
+    return []
 
 
 def _local_scan() -> dict[str, dict]:
@@ -53,14 +58,15 @@ async def discover(creds: TuyaCredentials) -> list[CameraInfo]:
     for dev in devices:
         device_id  = dev.get("id", "")
         product_id = dev.get("product_id", "")
+        model_name = dev.get("model", "")
         local_info = ip_map.get(device_id, {})
 
-        # product_id from local scan (productKey) takes precedence when cloud field is empty
+        # product_id from local scan takes precedence when cloud field is empty
         if not product_id:
             product_id = local_info.get("productKey", "")
 
-        # Resolve schema (local first, cloud fallback for unknown models)
-        sch = await schema_store.get(product_id, device_id, creds_dict)
+        # Resolve schema — try model_name as stable key, product_id as fallback
+        sch = await schema_store.get(product_id, device_id, creds_dict, model_name=model_name)
 
         if not schema_store.is_camera(sch, dev):
             continue
@@ -84,6 +90,7 @@ async def discover(creds: TuyaCredentials) -> list[CameraInfo]:
                 ip=ip,
                 mac=mac,
                 product_id=product_id,
+                model_name=model_name,
                 rtsp_password=creds.default_rtsp_password,
                 rtsp_username=creds.rtsp_username,
                 online=dev.get("online", False),

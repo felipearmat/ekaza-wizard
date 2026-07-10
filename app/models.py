@@ -17,7 +17,8 @@ class CameraInfo(BaseModel):
     local_key: str
     ip: str
     mac: str = ""
-    product_id: str = ""        # Tuya product_id (from cloud) — used for schema lookup
+    product_id: str = ""        # Tuya product_id — supplementary, may vary between batches
+    model_name: str = ""        # Tuya model field — stable model identifier
     rtsp_password: str
     rtsp_username: str = "admin"
     online: bool = True

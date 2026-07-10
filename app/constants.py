@@ -1,6 +1,9 @@
+# product_id is NOT a reliable primary identifier — the same physical model
+# can ship with different product_ids between production batches.
+# Camera detection uses category ("sp"/"ipc") + DP capability heuristics instead.
+# This set is kept only as a supplementary hint for bundled schema lookup.
 EKAZA_PRODUCT_IDS: set[str] = {
-    # Confirmed eKaza product IDs — keyed by Tuya cloud product_id
-    "wg808xnwx1zeavq2",  # EKRW-T5293 (dome PTZ)
+    "wg808xnwx1zeavq2",  # EKRW-T5293 (dome PTZ) — confirmed, batch 1
 }
 
 EKAZA_DPS_MANUAL = (

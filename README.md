@@ -87,8 +87,9 @@ Preencha as credenciais Tuya e a senha RTSP desejada, depois clique em **Descobr
 O que acontece por baixo:
 - Consulta a API Tuya Cloud para listar todos os dispositivos da conta
 - Faz um scan de rede local (tinytuya broadcast) para obter o IP e a `local_key` de cada dispositivo
-- Filtra apenas os dispositivos eKaza pelo `product_id`
-- Exibe a lista com nome, IP, `device_id` e status de alcançabilidade local
+- Filtra dispositivos pela categoria Tuya (`sp`/`ipc`) e pela presença de DPs de câmera
+- Busca os DPs do dispositivo em `/v1.1/devices/{id}/specifications` e monta as entidades dinamicamente
+- Exibe a lista com nome, modelo, IP, `device_id` e status de alcançabilidade local
 
 **3. Provisionar**
 
@@ -148,21 +149,21 @@ smart-life.com  smartlifeapp.com  fogcloud.io  nebulae-iot.com
 
 ## Câmeras compatíveis
 
-O `product_id` Tuya é um identificador **por modelo de produto** — o mesmo para todos os dispositivos fabricados com aquele modelo. O wizard o usa para reconhecer câmeras eKaza automaticamente durante a descoberta e buscar os DPs corretos na Tuya Cloud.
+O wizard detecta câmeras eKaza automaticamente pela **categoria Tuya** (`sp` / `ipc`) e pelas **capacidades do dispositivo** (presença do DP `ptz_control`), sem depender do `product_id`. Na primeira descoberta, consulta o endpoint `/v1.1/devices/{id}/specifications` para obter todos os DPs suportados pelo dispositivo e monta as entidades LocalTuya dinamicamente.
 
-| Modelo | Tipo | Product ID Tuya | Status |
-|---|---|---|---|
-| eKaza EKRW-T5293 | Dome PTZ | `wg808xnwx1zeavq2` | ✅ Testado |
-| eKaza EKRW-T5394 | Dome PTZ | — | 🔄 Aguardando product_id |
-| eKaza EKGD-T4117 | Câmera externa | — | 🔄 Aguardando product_id |
-| eKaza EKGD-T5530 | Câmera externa | — | 🔄 Aguardando product_id |
-| eKaza EKGD-T2233 | Câmera externa | — | 🔄 Aguardando product_id |
-| eKaza EKJS-T3188 | Câmera interna | — | 🔄 Aguardando product_id |
-| eKaza EKJS-T3169 | Câmera interna | — | 🔄 Aguardando product_id |
+> **Nota sobre `product_id`:** o mesmo modelo físico pode receber `product_id` diferentes entre lotes de fabricação. Por isso o wizard usa o campo `model` retornado diretamente pela API Tuya — um identificador estável — como chave de cache.
 
-> **Como obter o product_id de um modelo novo:** adicione a câmera ao [Smart Life](https://smart-life-app.com/), acesse [iot.tuya.com](https://iot.tuya.com) → **Cloud → Devices**, localize o dispositivo e anote o campo `Product ID`. Abra uma [issue](https://github.com/felipearmat/ekaza-wizard/issues) com o modelo e o product_id para que ele seja adicionado ao wizard.
+| Modelo | Tipo | Status |
+|---|---|---|
+| eKaza EKRW-T5293 | Dome PTZ | ✅ Testado com hardware físico |
+| eKaza EKRW-T5394 | Dome PTZ | 🔍 Suportado — aguardando confirmação |
+| eKaza EKGD-T4117 | Câmera externa | 🔍 Suportado — aguardando confirmação |
+| eKaza EKGD-T5530 | Câmera externa | 🔍 Suportado — aguardando confirmação |
+| eKaza EKGD-T2233 | Câmera externa | 🔍 Suportado — aguardando confirmação |
+| eKaza EKJS-T3188 | Câmera interna | 🔍 Suportado — aguardando confirmação |
+| eKaza EKJS-T3169 | Câmera interna | 🔍 Suportado — aguardando confirmação |
 
-Para modelos com product_id mapeado, o wizard busca automaticamente os DPs na Tuya Cloud na primeira descoberta e os armazena em cache para uso offline.
+> Câmeras de outros fabricantes baseadas em Tuya (categoria `sp`/`ipc`) também podem ser detectadas e provisionadas. Abra uma [issue](https://github.com/felipearmat/ekaza-wizard/issues){:target="_blank"} para reportar compatibilidade com outros modelos.
 
 ---
 

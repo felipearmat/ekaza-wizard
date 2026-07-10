@@ -1,12 +1,13 @@
 """Offline-first camera schema store.
 
 Resolution order:
-  1. /data/schemas/{product_id}.json  — user-fetched, persisted across restarts
-  2. /schemas/{product_id}.json       — bundled in image (read-only)
-  3. Tuya cloud (device functions + shadow properties) — fetched on demand
+  1. /data/schemas/{model_slug}.json  — cached on first cloud fetch (persists across restarts)
+  2. /schemas/{product_id}.json       — bundled in image (read-only, legacy key)
+  3. Tuya cloud — /v1.1/devices/{id}/specifications + /v1.0/devices/{id}
 """
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +68,22 @@ def _label(code: str) -> str:
     return _LABELS.get(code, code.replace("_", " ").title())
 
 
-def _load_local(product_id: str) -> dict | None:
-    for base in (_DATA, _BUNDLED):
-        p = base / f"{product_id}.json"
+def _model_slug(model_name: str) -> str:
+    """Convert model name to a safe filename slug, e.g. 'EKRW-T5293' → 'ekrw_t5293'."""
+    slug = re.sub(r"[^a-z0-9]+", "_", model_name.lower()).strip("_")
+    return slug or "unknown"
+
+
+def _load_local(product_id: str, model_name: str = "") -> dict | None:
+    """Try model-slug first (stable), then product_id (legacy bundled schemas)."""
+    candidates: list[Path] = []
+    if model_name:
+        slug = _model_slug(model_name)
+        candidates += [_DATA / f"{slug}.json", _BUNDLED / f"{slug}.json"]
+    if product_id:
+        candidates += [_DATA / f"{product_id}.json", _BUNDLED / f"{product_id}.json"]
+
+    for p in candidates:
         if p.exists():
             try:
                 return json.loads(p.read_text())
@@ -78,10 +92,16 @@ def _load_local(product_id: str) -> dict | None:
     return None
 
 
-def _persist(product_id: str, schema: dict) -> None:
+def _persist(schema: dict) -> None:
+    """Save under model-slug key (stable across product_id batch changes)."""
+    model_name = schema.get("model_name", "")
+    product_id = schema.get("product_id", "")
+    key = _model_slug(model_name) if model_name else product_id
+    if not key:
+        return
     try:
         _DATA.mkdir(parents=True, exist_ok=True)
-        (_DATA / f"{product_id}.json").write_text(
+        (_DATA / f"{key}.json").write_text(
             json.dumps(schema, ensure_ascii=False, indent=2)
         )
     except Exception:
@@ -89,7 +109,7 @@ def _persist(product_id: str, schema: dict) -> None:
 
 
 def _build_from_cloud(device_id: str, creds: dict) -> dict | None:
-    """Fetch and build a schema for device_id using Tuya cloud APIs."""
+    """Fetch schema via /v1.1/devices/{id}/specifications (single call, includes dp_ids)."""
     try:
         cloud = tinytuya.Cloud(
             apiRegion=creds["region"],
@@ -98,44 +118,40 @@ def _build_from_cloud(device_id: str, creds: dict) -> dict | None:
             apiDeviceID=device_id,
         )
 
-        fn_r = cloud.cloudrequest(f"/v1.0/iot-03/devices/{device_id}/functions")
-        functions: dict[str, dict] = {
-            f["code"]: f for f in fn_r.get("result", {}).get("functions", [])
-        }
-
-        sh_r = cloud.cloudrequest(f"/v2.0/cloud/thing/{device_id}/shadow/properties")
-        props: list[dict] = sh_r.get("result", {}).get("properties", [])
-
-        dev_r = cloud.cloudrequest(f"/v1.0/iot-03/devices/{device_id}")
-        dev: dict = dev_r.get("result", {})
-
-        if not props:
+        # v1.1/specifications returns functions with dp_ids in one call —
+        # replaces the old /v1.0/iot-03/functions + /v2.0/shadow/properties dance
+        spec_r = cloud.cloudrequest(f"/v1.1/devices/{device_id}/specifications", "GET")
+        spec_fns = spec_r.get("result", {}).get("functions", [])
+        if not spec_fns:
             return None
 
-        return _assemble(dev, functions, props)
+        dev_r = cloud.cloudrequest(f"/v1.0/devices/{device_id}", "GET")
+        dev = dev_r.get("result", {})
+
+        return _assemble(dev, spec_fns)
     except Exception:
         return None
 
 
-def _assemble(dev: dict, functions: dict, props: list[dict]) -> dict:
+def _assemble(dev: dict, spec_fns: list[dict]) -> dict:
+    """Build a wizard schema from device info + spec functions (v1.1 format)."""
     entities: list[dict] = []
     dp_map:   list[dict] = []
     dps_list: list[str]  = []
 
-    for p in props:
-        dp   = p.get("dp_id")
-        code = p.get("code", "")
-        fn   = functions.get(code, {})
-        ftype = fn.get("type", "")
+    for f in spec_fns:
+        dp   = f.get("dp_id")
+        code = f.get("code", "")
+        ftype = f.get("type", "")
         try:
-            values = json.loads(fn.get("values", "{}") or "{}")
+            values = json.loads(f.get("values", "{}") or "{}")
         except Exception:
             values = {}
 
         dp_map.append({"dp": dp, "code": code, "type": ftype,
-                        "writable": bool(fn), "values": values})
+                        "writable": True, "values": values})
 
-        if code in _SKIP_ENTITY or not ftype:
+        if code in _SKIP_ENTITY or not ftype or not dp:
             continue
 
         dps_list.append(str(dp))
@@ -168,10 +184,10 @@ def _assemble(dev: dict, functions: dict, props: list[dict]) -> dict:
         return next((e["dp"] for e in dp_map if e["code"] == code), None)
 
     caps = {
-        "ptz":           "ptz_control" in codes,
-        "zoom":          "zoom_control" in codes,
-        "audio":         "decibel_switch" in codes,
-        "onvif":         "onvif_switch" in codes,
+        "ptz":             "ptz_control" in codes,
+        "zoom":            "zoom_control" in codes,
+        "audio":           "decibel_switch" in codes,
+        "onvif":           "onvif_switch" in codes,
         "onvif_enable_dp": _find_dp("onvif_switch"),
         "onvif_pwd_dp":    _find_dp("onvif_change_pwd"),
         "alarm_dp":        _find_dp("alarm_message"),
@@ -197,9 +213,10 @@ async def get(
     product_id: str,
     device_id: str | None = None,
     creds: dict | None = None,
+    model_name: str = "",
 ) -> dict | None:
-    """Return schema for product_id, or None if unavailable."""
-    schema = _load_local(product_id)
+    """Return schema for a camera, fetching from cloud if needed."""
+    schema = _load_local(product_id, model_name)
     if schema:
         return schema
 
@@ -207,7 +224,7 @@ async def get(
         loop = asyncio.get_event_loop()
         schema = await loop.run_in_executor(None, _build_from_cloud, device_id, creds)
         if schema:
-            _persist(product_id, schema)
+            _persist(schema)
 
     return schema
 
