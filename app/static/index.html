@@ -300,7 +300,7 @@
     btn.innerHTML = '<span class="spinner"></span> Buscando…';
 
     try {
-      const res = await fetch('/api/discover', {
+      const res = await fetch('api/discover', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({credentials}),
@@ -391,7 +391,7 @@
     log.innerHTML = '';
 
     const body = JSON.stringify({credentials, cameras});
-    const res = await fetch('/api/provision', {
+    const res = await fetch('api/provision', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body,
@@ -468,7 +468,7 @@
   // ── Auto-load saved config on page start ─────────────────────────────────
   (async () => {
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch('api/config');
       if (!res.ok) return;
       const cfg = await res.json();
       if (cfg.tuya_access_id)     document.getElementById('access_id').value     = cfg.tuya_access_id;

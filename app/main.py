@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
@@ -40,8 +40,12 @@ async def _shutdown():
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    return (_HERE / "static" / "index.html").read_text()
+async def index(request: Request):
+    # Inject <base> tag so relative fetch() calls work through HA ingress proxy
+    ingress_path = request.headers.get("X-Ingress-Path", "")
+    base_tag = f'<base href="{ingress_path}/">' if ingress_path else ""
+    html = (_HERE / "static" / "index.html").read_text()
+    return html.replace("<title>", f"{base_tag}<title>", 1)
 
 
 @app.get("/api/config")
