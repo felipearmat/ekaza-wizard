@@ -178,3 +178,9 @@ O add-on roda como servidor FastAPI na porta `7788` com ingress habilitado — a
 ## Licença
 
 MIT
+
+---
+
+## Créditos
+
+Este projeto foi desenvolvido com o auxílio do [Claude](https://claude.ai) (Anthropic), supervisionado em todas as etapas de desenvolvimento e validado com equipamentos físicos em ambiente local.
