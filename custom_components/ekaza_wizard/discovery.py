@@ -1,4 +1,4 @@
-"""Camera discovery: UDP scan + per-device Tuya Cloud lookup."""
+"""Camera discovery: Tuya Cloud (primary) + UDP scan (fallback)."""
 from __future__ import annotations
 
 import asyncio
@@ -50,7 +50,35 @@ def _tuya_get(base: str, path: str, access_id: str, secret: str, token: str | No
         return {}
 
 
-def _cloud_devices(creds: TuyaCredentials) -> list[dict]:
+def _cloud_devices_via_tinytuya(creds: TuyaCredentials, seed_device_id: str) -> list[dict]:
+    """Use tinytuya.Cloud with a known device_id to resolve the app user uid."""
+    try:
+        cloud = tinytuya.Cloud(
+            apiRegion=creds.region,
+            apiKey=creds.access_id,
+            apiSecret=creds.access_secret,
+            apiDeviceID=seed_device_id or None,
+        )
+        raw = cloud.getdevices()
+    except Exception as exc:
+        _LOGGER.warning("tinytuya.Cloud.getdevices() failed: %s", exc)
+        return []
+
+    if isinstance(raw, list):
+        devices = raw
+    elif isinstance(raw, dict):
+        devices = raw.get("result", {}).get("list", raw.get("list", []))
+    else:
+        devices = []
+
+    _LOGGER.debug("tinytuya.Cloud returned %d device(s)", len(devices))
+    if not devices:
+        _LOGGER.warning("No devices from tinytuya.Cloud (seed=%s)", (seed_device_id or "none")[:8])
+    return devices
+
+
+def _cloud_devices_via_udp(creds: TuyaCredentials) -> list[dict]:
+    """UDP broadcast scan + per-device cloud lookup (works only on host network)."""
     base = _TUYA_BASE.get(creds.region, _TUYA_BASE["us"])
 
     token_r = _tuya_get(base, "/v1.0/token?grant_type=1", creds.access_id, creds.access_secret)
@@ -79,17 +107,43 @@ def _cloud_devices(creds: TuyaCredentials) -> list[dict]:
                 else:
                     _LOGGER.debug("Device %s cloud lookup: %s", dev_id[:8], r)
     except Exception as exc:
-        _LOGGER.warning("Cloud device lookup failed: %s", exc)
+        _LOGGER.warning("UDP scan failed: %s", exc)
 
-    _LOGGER.debug("Discovery found %d device(s) total", len(devices))
+    _LOGGER.debug("UDP discovery found %d device(s)", len(devices))
     return devices
 
 
-async def discover(creds: TuyaCredentials, hass=None) -> list[CameraInfo]:
+def _cloud_devices(creds: TuyaCredentials, seed_device_id: str = "") -> list[dict]:
+    if seed_device_id:
+        devices = _cloud_devices_via_tinytuya(creds, seed_device_id)
+        if devices:
+            return devices
+        _LOGGER.warning("Cloud lookup with seed failed, falling back to UDP scan")
+
+    return _cloud_devices_via_udp(creds)
+
+
+async def discover(creds: TuyaCredentials, hass=None, seed_device_id: str = "") -> list[CameraInfo]:
     loop = asyncio.get_running_loop()
     creds_dict = {"region": creds.region, "access_id": creds.access_id, "access_secret": creds.access_secret}
 
-    devices = await loop.run_in_executor(None, _cloud_devices, creds)
+    # Collect seed from LocalTuya if not provided
+    if not seed_device_id and hass:
+        for entry in hass.config_entries.async_entries("localtuya"):
+            # Try both LocalTuya data structures
+            dev_id = entry.data.get("device_id", "")
+            if dev_id:
+                seed_device_id = dev_id
+                break
+            for dev_id in entry.data.get("devices", {}).keys():
+                seed_device_id = dev_id
+                break
+            if seed_device_id:
+                break
+        if seed_device_id:
+            _LOGGER.debug("Using LocalTuya device as seed: %s...", seed_device_id[:8])
+
+    devices = await loop.run_in_executor(None, _cloud_devices, creds, seed_device_id)
 
     cameras, seen = [], {}
     for dev in devices:

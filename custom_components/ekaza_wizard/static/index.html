@@ -180,7 +180,7 @@
 
 <div class="container">
   <h1>eKaza <span>Wizard</span></h1>
-  <p class="subtitle">Configuração automática de câmeras PTZ — Frigate + LocalTuya + Dashboard <small style="opacity:.5;font-size:.75em">v0.3.2</small></p>
+  <p class="subtitle">Configuração automática de câmeras PTZ — Frigate + LocalTuya + Dashboard <small style="opacity:.5;font-size:.75em">v0.3.3</small></p>
 
   <!-- ── Tab navigation ── -->
   <div class="tabs">
@@ -231,6 +231,14 @@
         <div>
           <label>Senha RTSP (para as câmeras)</label>
           <input id="rtsp-pwd" type="password" placeholder="SenhaForte123!">
+        </div>
+        <div>
+          <label>Device ID semente <span style="font-size:0.78rem;opacity:.6">(opcional — necessário se a câmera estiver offline)</span></label>
+          <input id="seed-device-id" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxx" style="font-family:monospace">
+          <p style="font-size:0.75rem;color:var(--text-dim);margin-top:4px;line-height:1.4;">
+            Qualquer Device ID Tuya da sua conta. Usado para localizar dispositivos via Cloud sem precisar de scan UDP local.
+            Encontre no Smart Life: ⚙️ → Informações do Dispositivo → ID Virtual.
+          </p>
         </div>
       </div>
       <div class="actions">
@@ -445,10 +453,11 @@ async function loadConfig() {
     const r = await fetch(`${API}/config`);
     if (!r.ok) return;
     const d = await r.json();
-    if (d.tuya_access_id)     document.getElementById('access-id').value     = d.tuya_access_id;
-    if (d.tuya_access_secret) document.getElementById('access-secret').value = d.tuya_access_secret;
-    if (d.tuya_region)        document.getElementById('region').value         = d.tuya_region;
-    if (d.rtsp_password)      document.getElementById('rtsp-pwd').value       = d.rtsp_password;
+    if (d.tuya_access_id)     document.getElementById('access-id').value       = d.tuya_access_id;
+    if (d.tuya_access_secret) document.getElementById('access-secret').value   = d.tuya_access_secret;
+    if (d.tuya_region)        document.getElementById('region').value           = d.tuya_region;
+    if (d.rtsp_password)      document.getElementById('rtsp-pwd').value         = d.rtsp_password;
+    if (d.seed_device_id)     document.getElementById('seed-device-id').value   = d.seed_device_id;
   } catch (_) {}
 }
 
@@ -459,6 +468,7 @@ function getCredentials() {
     region:                document.getElementById('region').value,
     default_rtsp_password: document.getElementById('rtsp-pwd').value,
     rtsp_username:         'admin',
+    seed_device_id:        document.getElementById('seed-device-id').value.trim(),
   };
 }
 
@@ -522,7 +532,7 @@ async function doDiscover() {
 function renderCameras() {
   const wrap = document.getElementById('cam-list-wrap');
   if (!_cameras.length) {
-    wrap.innerHTML = '<p style="color:var(--err)">Nenhuma câmera encontrada. Verifique as credenciais e a rede local.</p>';
+    wrap.innerHTML = '<p style="color:var(--err)">Nenhuma câmera encontrada. Verifique as credenciais e preencha o campo <strong>Device ID semente</strong> com o ID de qualquer câmera Tuya da sua conta (encontrado no Smart Life: ⚙️ → Informações do Dispositivo → ID Virtual).</p>';
     return;
   }
   const rows = _cameras.map((c,i) => `

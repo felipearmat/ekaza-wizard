@@ -7,6 +7,7 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     CONF_RTSP_PASSWORD,
+    CONF_SEED_DEVICE_ID,
     CONF_TUYA_ACCESS_ID,
     CONF_TUYA_ACCESS_SECRET,
     CONF_TUYA_REGION,
@@ -19,6 +20,7 @@ _SCHEMA = vol.Schema(
         vol.Optional(CONF_TUYA_ACCESS_SECRET, default=""): str,
         vol.Optional(CONF_TUYA_REGION, default="us"): vol.In(["us", "eu", "in", "cn"]),
         vol.Optional(CONF_RTSP_PASSWORD, default=""): str,
+        vol.Optional(CONF_SEED_DEVICE_ID, default=""): str,
     }
 )
 

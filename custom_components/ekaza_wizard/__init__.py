@@ -20,6 +20,7 @@ from . import discovery, motion_bridge, provisioner, remover
 from .dashboard import list_dashboards
 from .const import (
     CONF_RTSP_PASSWORD,
+    CONF_SEED_DEVICE_ID,
     CONF_TUYA_ACCESS_ID,
     CONF_TUYA_ACCESS_SECRET,
     CONF_TUYA_REGION,
@@ -40,7 +41,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         (_STATIC / "index.html").read_text, "utf-8"
     )
     hass.http.register_view(EkazaIndexView(html))
-    hass.http.register_view(EkazaConfigView(entry))
+    hass.http.register_view(EkazaConfigView(hass, entry))
     hass.http.register_view(EkazaDiscoverView(hass, entry))
     hass.http.register_view(EkazaProvisionView(hass, entry))
     hass.http.register_view(EkazaCheckView(hass))
@@ -104,7 +105,8 @@ class EkazaConfigView(HomeAssistantView):
     name = "api:ekaza_wizard:config"
     requires_auth = False
 
-    def __init__(self, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._hass = hass
         self._entry = entry
 
     async def get(self, request: web.Request) -> web.Response:
@@ -114,7 +116,23 @@ class EkazaConfigView(HomeAssistantView):
             "tuya_access_secret": d.get(CONF_TUYA_ACCESS_SECRET, ""),
             "tuya_region": d.get(CONF_TUYA_REGION, "us"),
             "rtsp_password": d.get(CONF_RTSP_PASSWORD, ""),
+            "seed_device_id": d.get(CONF_SEED_DEVICE_ID, ""),
         })
+
+    async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return self.json({"error": "JSON inválido"}, status_code=400)
+
+        new_data = dict(self._entry.data)
+        for key in (CONF_TUYA_ACCESS_ID, CONF_TUYA_ACCESS_SECRET, CONF_TUYA_REGION,
+                    CONF_RTSP_PASSWORD, CONF_SEED_DEVICE_ID):
+            if key in body:
+                new_data[key] = body[key]
+
+        self._hass.config_entries.async_update_entry(self._entry, data=new_data)
+        return self.json({"ok": True})
 
 
 class EkazaDiscoverView(HomeAssistantView):
@@ -138,7 +156,13 @@ class EkazaDiscoverView(HomeAssistantView):
             return self.json({"error": "Credenciais Tuya obrigatórias"}, status_code=400)
 
         try:
-            cameras = await discovery.discover(creds, hass=self._hass)
+            seed = (override.get("seed_device_id") or self._entry.data.get(CONF_SEED_DEVICE_ID, "")).strip()
+            # Auto-save seed_device_id if user provided a new one
+            if seed and seed != self._entry.data.get(CONF_SEED_DEVICE_ID, ""):
+                new_data = dict(self._entry.data)
+                new_data[CONF_SEED_DEVICE_ID] = seed
+                self._hass.config_entries.async_update_entry(self._entry, data=new_data)
+            cameras = await discovery.discover(creds, hass=self._hass, seed_device_id=seed)
             return self.json({"cameras": [c.model_dump() for c in cameras]})
         except Exception as exc:
             _LOGGER.exception("Discovery failed")
