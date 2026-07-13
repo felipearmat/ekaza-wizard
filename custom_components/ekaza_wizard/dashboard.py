@@ -194,14 +194,15 @@ async def update_dashboard(hass: HomeAssistant, cameras: list[CameraInfo], targe
         target, config = result
         views: list = config.get("views", [])
 
-        cam_view = next((v for v in views if v.get("path") == _DASHBOARD_PATH), None)
-        if cam_view is None:
-            cam_view = {"title": "Câmeras", "path": _DASHBOARD_PATH, "icon": "mdi:cctv", "cards": []}
-            views.append(cam_view)
+        # Always add to the first existing tab — never create a second unnamed view
+        if not views:
+            views = [{"cards": []}]
+            config["views"] = views
+        target_view = views[0]
 
-        existing = {c.get("entity") for c in cam_view.get("cards", []) if c.get("type") == _CARD_TYPE}
+        existing = {c.get("entity") for c in target_view.get("cards", []) if c.get("type") == _CARD_TYPE}
         new_cards = [_card(cam) for cam in cameras if f"camera.{cam.slug}" not in existing]
-        cam_view.setdefault("cards", []).extend(new_cards)
+        target_view.setdefault("cards", []).extend(new_cards)
 
         config["views"] = views
         await target.async_save(config)

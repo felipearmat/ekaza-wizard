@@ -29,13 +29,32 @@ _SWITCH_MAP: dict[str, tuple[str, str]] = {
 _debounce_tasks: dict[str, asyncio.Task] = {}
 
 
-def _frigate_base(hass: HomeAssistant) -> str:
+async def _resolve_frigate_base() -> str:
+    """Resolve Frigate container IP via Supervisor API. Falls back to 127.0.0.1."""
+    import os
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        return "http://127.0.0.1:5000"
+    headers = {"Authorization": f"Bearer {token}"}
     try:
-        ip = getattr(hass.config.api, "local_ip", None)
-        if ip:
-            return f"http://{ip}:5000"
-    except Exception:
-        pass
+        async with aiohttp.ClientSession() as s:
+            r = await s.get("http://supervisor/addons", headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=5))
+            if r.status == 200:
+                data = await r.json()
+                for addon in data.get("data", {}).get("addons", []):
+                    slug = addon.get("slug", "")
+                    name = addon.get("name", "").lower()
+                    if "frigate" in slug.lower() or "frigate" in name:
+                        info_r = await s.get(f"http://supervisor/addons/{slug}/info",
+                                             headers=headers,
+                                             timeout=aiohttp.ClientTimeout(total=5))
+                        if info_r.status == 200:
+                            ip = (await info_r.json()).get("data", {}).get("ip_address")
+                            if ip:
+                                return f"http://{ip}:5000"
+    except Exception as exc:
+        _LOGGER.debug("Supervisor lookup failed for syncer: %s", exc)
     return "http://127.0.0.1:5000"
 
 
@@ -87,6 +106,8 @@ async def _persist(base: str, slug: str, block: str, key: str, enabled: bool) ->
 
 async def setup(hass: HomeAssistant) -> None:
     """Register Frigate switch state change listeners for config persistence."""
+    base = await _resolve_frigate_base()
+    _LOGGER.debug("Frigate syncer base URL: %s", base)
 
     @callback
     def _on_state_changed(event: Event) -> None:
@@ -104,7 +125,6 @@ async def setup(hass: HomeAssistant) -> None:
 
         slug, block, key = parsed
         enabled = new_state.state == "on"
-        base = _frigate_base(hass)
 
         # Debounce — cancel pending write for the same entity
         if entity_id in _debounce_tasks and not _debounce_tasks[entity_id].done():

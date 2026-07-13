@@ -178,7 +178,7 @@
 </div>
 
 <!-- ── Operation banner ── -->
-<div id="version-badge">eKaza Wizard v0.3.5</div>
+<div id="version-badge">eKaza Wizard v0.3.16</div>
 
 <div id="op-banner">
   <span class="spin">⏳</span>&nbsp;
@@ -238,14 +238,6 @@
         <div>
           <label>Senha RTSP (para as câmeras)</label>
           <input id="rtsp-pwd" type="password" placeholder="SenhaForte123!">
-        </div>
-        <div>
-          <label>Device ID semente <span style="font-size:0.78rem;opacity:.6">(opcional — necessário se a câmera estiver offline)</span></label>
-          <input id="seed-device-id" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxx" style="font-family:monospace">
-          <p style="font-size:0.75rem;color:var(--text-dim);margin-top:4px;line-height:1.4;">
-            Qualquer Device ID Tuya da sua conta. Usado para localizar dispositivos via Cloud sem precisar de scan UDP local.
-            Encontre no Smart Life: ⚙️ → Informações do Dispositivo → ID Virtual.
-          </p>
         </div>
       </div>
       <div class="actions">
@@ -464,7 +456,6 @@ async function loadConfig() {
     if (d.tuya_access_secret) document.getElementById('access-secret').value   = d.tuya_access_secret;
     if (d.tuya_region)        document.getElementById('region').value           = d.tuya_region;
     if (d.rtsp_password)      document.getElementById('rtsp-pwd').value         = d.rtsp_password;
-    if (d.seed_device_id)     document.getElementById('seed-device-id').value   = d.seed_device_id;
   } catch (_) {}
 }
 
@@ -475,7 +466,6 @@ function getCredentials() {
     region:                document.getElementById('region').value,
     default_rtsp_password: document.getElementById('rtsp-pwd').value,
     rtsp_username:         'admin',
-    seed_device_id:        document.getElementById('seed-device-id').value.trim(),
   };
 }
 
@@ -539,27 +529,37 @@ async function doDiscover() {
 function renderCameras() {
   const wrap = document.getElementById('cam-list-wrap');
   if (!_cameras.length) {
-    wrap.innerHTML = '<p style="color:var(--err)">Nenhuma câmera encontrada. Verifique as credenciais e preencha o campo <strong>Device ID semente</strong> com o ID de qualquer câmera Tuya da sua conta (encontrado no Smart Life: ⚙️ → Informações do Dispositivo → ID Virtual).</p>';
+    wrap.innerHTML = '<p style="color:var(--err)">Nenhuma câmera encontrada. Verifique as credenciais Tuya (Access ID, Secret e Region) e certifique-se de que os dispositivos estão associados ao projeto na Tuya IoT Platform.</p>';
     return;
   }
+  const hasEmptyIp = _cameras.some(c => !c.ip);
   const rows = _cameras.map((c,i) => `
     <tr>
       <td><input type="checkbox" class="cam-cb" data-idx="${i}" checked></td>
       <td>${esc(c.name)}</td>
       <td><code>${esc(c.slug)}</code></td>
-      <td><code>${esc(c.ip)}</code></td>
+      <td><input class="cam-ip" data-idx="${i}" type="text"
+            value="${esc(c.ip)}" placeholder="192.168.x.x"
+            style="font-family:monospace;width:130px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem${c.ip?'':';border-color:var(--err)'}"></td>
       <td><span class="badge ${c.online?'badge-ok':'badge-off'}">${c.online?'Online':'Offline'}</span></td>
     </tr>`).join('');
   wrap.innerHTML = `
     <table class="cam-table">
-      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP</th><th>Status</th></tr></thead>
+      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP LAN</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
+    </table>
+    ${hasEmptyIp ? '<p style="color:var(--warn,#e67e22);font-size:.82rem;margin-top:8px">⚠ IP não detectado automaticamente — preencha o IP LAN de cada câmera antes de provisionar.</p>' : ''}`;
 }
 
 function getSelected() {
   return Array.from(document.querySelectorAll('.cam-cb:checked'))
-              .map(cb => _cameras[+cb.dataset.idx]);
+              .map(cb => {
+                const idx = +cb.dataset.idx;
+                const cam = {..._cameras[idx]};
+                const ipField = document.querySelector(`.cam-ip[data-idx="${idx}"]`);
+                if (ipField) cam.ip = ipField.value.trim();
+                return cam;
+              });
 }
 
 // ── Provision ────────────────────────────────────────────────────────────────
@@ -579,6 +579,12 @@ async function doProvision() {
   if (!selected.length) { alert('Selecione pelo menos uma câmera.'); return; }
   const rtspPwd = document.getElementById('rtsp-pwd').value;
   if (!rtspPwd) { alert('Defina a senha RTSP antes de provisionar.'); return; }
+
+  const missingIp = selected.filter(c => !c.ip);
+  if (missingIp.length) {
+    alert(`Preencha o IP LAN de: ${missingIp.map(c => c.name).join(', ')}`);
+    return;
+  }
 
   const btn = document.getElementById('btn-provision');
   btn.disabled = true; btn.textContent = '⏳ Provisionando…';

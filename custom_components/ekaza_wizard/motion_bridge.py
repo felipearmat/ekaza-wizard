@@ -86,15 +86,40 @@ class _BridgeManager:
         self._listeners: dict[str, tuple[_CameraListener, threading.Event]] = {}
         self._frigate_base = "http://127.0.0.1:5000"
 
+    async def _resolve_frigate_base(self, hass: HomeAssistant) -> None:
+        """Resolve Frigate container IP via Supervisor API (same approach as frigate.py)."""
+        import os
+        import aiohttp as _aiohttp
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        if not token:
+            return
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            async with _aiohttp.ClientSession() as s:
+                r = await s.get("http://supervisor/addons", headers=headers,
+                                timeout=_aiohttp.ClientTimeout(total=5))
+                if r.status == 200:
+                    data = await r.json()
+                    for addon in data.get("data", {}).get("addons", []):
+                        slug = addon.get("slug", "")
+                        name = addon.get("name", "").lower()
+                        if "frigate" in slug.lower() or "frigate" in name:
+                            info_r = await s.get(f"http://supervisor/addons/{slug}/info",
+                                                 headers=headers,
+                                                 timeout=_aiohttp.ClientTimeout(total=5))
+                            if info_r.status == 200:
+                                info = await info_r.json()
+                                ip = info.get("data", {}).get("ip_address")
+                                if ip:
+                                    self._frigate_base = f"http://{ip}:5000"
+                                    _LOGGER.debug("Motion bridge Frigate IP: %s", ip)
+                                    return
+        except Exception as exc:
+            _LOGGER.debug("Supervisor lookup failed for motion bridge: %s", exc)
+
     def start_all(self, hass: HomeAssistant, cameras: list[CameraInfo]) -> None:
         loop = hass.loop
-        # Use LAN IP so the bridge reaches Frigate from HA core container
-        try:
-            ip = getattr(hass.config.api, "local_ip", None)
-            if ip:
-                self._frigate_base = f"http://{ip}:5000"
-        except Exception:
-            pass
+        asyncio.run_coroutine_threadsafe(self._resolve_frigate_base(hass), loop).result(timeout=10)
 
         for cam in cameras:
             if cam.slug in self._listeners:

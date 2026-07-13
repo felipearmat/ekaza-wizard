@@ -10,16 +10,40 @@ from .models import CameraInfo
 
 _LOGGER = logging.getLogger(__name__)
 _FRIGATE_PORT = 5000
+_SUPERVISOR = "http://supervisor"
 
 
-def _frigate_base(hass=None) -> str:
+async def _frigate_base() -> str:
+    """Resolve Frigate's container IP via Supervisor API (most reliable from inside HA).
+
+    Falls back to 127.0.0.1 if Supervisor is unavailable (e.g. in tests).
+    Using hass.config.api.local_ip (the HA host IP) does NOT reliably route to
+    the Frigate container from within HA due to Docker bridge networking.
+    """
+    import os
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        return f"http://127.0.0.1:{_FRIGATE_PORT}"
+    headers = {"Authorization": f"Bearer {token}"}
     try:
-        if hass is not None:
-            ip = getattr(hass.config.api, "local_ip", None)
-            if ip:
-                return f"http://{ip}:{_FRIGATE_PORT}"
-    except Exception:
-        pass
+        async with aiohttp.ClientSession() as s:
+            # Try known Frigate add-on slugs first, then scan all add-ons
+            r = await s.get(f"{_SUPERVISOR}/addons", headers=headers, timeout=aiohttp.ClientTimeout(total=5))
+            if r.status == 200:
+                data = await r.json()
+                for addon in data.get("data", {}).get("addons", []):
+                    slug = addon.get("slug", "")
+                    name = addon.get("name", "").lower()
+                    if "frigate" in slug.lower() or "frigate" in name:
+                        info_r = await s.get(f"{_SUPERVISOR}/addons/{slug}/info", headers=headers, timeout=aiohttp.ClientTimeout(total=5))
+                        if info_r.status == 200:
+                            info = await info_r.json()
+                            ip = info.get("data", {}).get("ip_address")
+                            if ip:
+                                _LOGGER.debug("Frigate IP via Supervisor: %s", ip)
+                                return f"http://{ip}:{_FRIGATE_PORT}"
+    except Exception as exc:
+        _LOGGER.debug("Supervisor lookup failed, using 127.0.0.1: %s", exc)
     return f"http://127.0.0.1:{_FRIGATE_PORT}"
 
 
@@ -85,6 +109,11 @@ def _merge_cameras(existing: dict, cameras: list[CameraInfo]) -> dict:
         for cam in cameras:
             if cam.slug not in cams:
                 cams.append(cam.slug)
+    # Ensure recording retention uses active_objects — retains segments only while
+    # tracked objects are present, avoiding near-empty timelines from mode:motion.
+    rec = merged.setdefault("record", {})
+    for section in ("alerts", "detections"):
+        rec.setdefault(section, {}).setdefault("retain", {})["mode"] = "active_objects"
     return merged
 
 
@@ -106,7 +135,7 @@ def _remove_from_config_dict(cfg: dict, slug: str) -> tuple[dict, bool]:
 
 async def apply(hass, cameras: list[CameraInfo]) -> tuple[bool, str]:
     """Add cameras to Frigate config and restart Frigate. Returns (ok, message)."""
-    base = _frigate_base(hass)
+    base = await _frigate_base()
     try:
         existing = await _fetch_raw_config(base)
         merged = _merge_cameras(existing, cameras)
@@ -121,7 +150,7 @@ async def apply(hass, cameras: list[CameraInfo]) -> tuple[bool, str]:
 
 async def remove_camera(slug: str, hass=None) -> tuple[bool, str]:
     """Remove camera from Frigate config and restart Frigate. Returns (ok, message)."""
-    base = _frigate_base(hass)
+    base = await _frigate_base()
     try:
         existing = await _fetch_raw_config(base)
         updated, changed = _remove_from_config_dict(existing, slug)
@@ -138,7 +167,7 @@ async def remove_camera(slug: str, hass=None) -> tuple[bool, str]:
 
 async def restart_frigate(hass=None) -> bool:
     """Restart Frigate by re-saving current config with save_option=restart."""
-    base = _frigate_base(hass)
+    base = await _frigate_base()
     try:
         existing = await _fetch_raw_config(base)
         ok, _ = await _save_config(base, existing, option="restart")
@@ -150,7 +179,7 @@ async def restart_frigate(hass=None) -> bool:
 
 async def get_camera_slugs(hass=None) -> list[str]:
     """Return list of camera slugs currently in Frigate config."""
-    base = _frigate_base(hass)
+    base = await _frigate_base()
     try:
         cfg = await _fetch_raw_config(base)
         return list(cfg.get("cameras", {}).keys())

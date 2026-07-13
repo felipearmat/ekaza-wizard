@@ -43,6 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(EkazaIndexView(html))
     hass.http.register_view(EkazaConfigView(hass, entry))
     hass.http.register_view(EkazaDiscoverView(hass, entry))
+    hass.http.register_view(EkazaDebugDiscoveryView(hass, entry))
     hass.http.register_view(EkazaProvisionView(hass, entry))
     hass.http.register_view(EkazaCheckView(hass))
     hass.http.register_view(EkazaListCamerasView(hass))
@@ -167,6 +168,99 @@ class EkazaDiscoverView(HomeAssistantView):
         except Exception as exc:
             _LOGGER.exception("Discovery failed")
             return self.json({"error": str(exc)}, status_code=500)
+
+
+class EkazaDebugDiscoveryView(HomeAssistantView):
+    """Temporary diagnostic endpoint — returns raw tinytuya output."""
+    url = "/api/ekaza_wizard/debug_discovery"
+    name = "api:ekaza_wizard:debug_discovery"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._hass = hass
+        self._entry = entry
+
+    async def get(self, request: web.Request) -> web.Response:
+        import asyncio
+        import tinytuya as tt
+        loop = asyncio.get_running_loop()
+        d = self._entry.data
+        access_id = d.get(CONF_TUYA_ACCESS_ID, "")
+        access_secret = d.get(CONF_TUYA_ACCESS_SECRET, "")
+        region = d.get(CONF_TUYA_REGION, "us")
+
+        def _run_sync():
+            result = {}
+            try:
+                result["tinytuya_version"] = tt.__version__
+            except Exception as e:
+                result["tinytuya_version"] = f"error: {e}"
+
+            try:
+                cloud = tt.Cloud(apiRegion=region, apiKey=access_id, apiSecret=access_secret)
+                raw = cloud.getdevices()
+                result["getdevices_type"] = type(raw).__name__
+                if isinstance(raw, list):
+                    result["getdevices_count"] = len(raw)
+                    result["getdevices_sample"] = [{
+                        "name": dv.get("name"), "id": dv.get("id", "")[:12],
+                        "category": dv.get("category"),
+                        "key_field": "key" if "key" in dv else ("local_key" if "local_key" in dv else "none"),
+                        "product_id": dv.get("product_id"),
+                        "mac": dv.get("mac", ""),
+                    } for dv in raw[:5]]
+                else:
+                    result["getdevices_raw"] = str(raw)[:500]
+            except Exception as e:
+                result["getdevices_error"] = str(e)
+
+            try:
+                from . import schema_store
+                result["schema_bundle"] = [str(p.name) for p in schema_store._BUNDLED.glob("*.json")]
+            except Exception as e:
+                result["schema_error"] = str(e)
+
+            return result
+
+        data = await loop.run_in_executor(None, _run_sync)
+
+        # Step 2: Test the full discover pipeline (async)
+        try:
+            from . import schema_store as ss
+            from .discovery import _cloud_devices
+            from .models import TuyaCredentials as TC
+
+            creds = TC(
+                access_id=access_id, access_secret=access_secret,
+                region=region, default_rtsp_password="",
+            )
+            creds_dict = {"region": region, "access_id": access_id, "access_secret": access_secret}
+
+            devices = await loop.run_in_executor(None, _cloud_devices, creds, "")
+            data["pipeline_device_count"] = len(devices)
+
+            per_device = []
+            for dev in devices:
+                pid = dev.get("product_id", "")
+                did = dev.get("id", "")
+                schema = await ss.get(pid, did, creds_dict)
+                is_cam = ss.is_camera(schema, dev)
+                per_device.append({
+                    "name": dev.get("name"),
+                    "id": did[:12],
+                    "category": dev.get("category"),
+                    "product_id": pid,
+                    "schema_loaded": schema is not None,
+                    "schema_has_ptz": schema.get("capabilities", {}).get("ptz") if schema else None,
+                    "is_camera": is_cam,
+                })
+            data["pipeline_per_device"] = per_device
+        except Exception as e:
+            import traceback
+            data["pipeline_error"] = str(e)
+            data["pipeline_traceback"] = traceback.format_exc()
+
+        return self.json(data)
 
 
 class EkazaCheckView(HomeAssistantView):

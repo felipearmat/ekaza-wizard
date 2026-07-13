@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from . import frigate as frigate_mod
 from . import motion_bridge
 from .dashboard import update_dashboard
-from .ha_helpers import create_input_boolean
+from .ha_helpers import assign_entity_to_area, create_input_boolean, ensure_area, hide_entity
 from .localtuya_flow import configure as configure_localtuya
 from .models import CameraInfo, TuyaCredentials
 from .scripts_gen import write_scripts
@@ -100,6 +100,12 @@ async def run(
         )
         yield _sse("step", {"camera": cam.slug, "step": "motion_bridge_boolean", "ok": ok3, "detail": msg3})
 
+        cam_area_id = await ensure_area(hass, cam.name)
+        bool_entity = f"input_boolean.{cam.slug}_motion_bridge"
+        await hide_entity(hass, bool_entity)
+        if cam_area_id:
+            await assign_entity_to_area(hass, bool_entity, cam_area_id)
+
     # Step 3: Reload scripts via HA service
     try:
         await hass.services.async_call("script", "reload", blocking=True)
@@ -116,6 +122,12 @@ async def run(
         "detail": "Integração Frigate recarregada — entidades de câmera criadas" if reloaded
                   else "Recarregue a integração Frigate manualmente (Settings → Integrations → Frigate → Reload)",
     })
+
+    # Assign Frigate camera entities to each camera's own area
+    for cam in cameras:
+        cam_area_id = await ensure_area(hass, cam.name)
+        if cam_area_id:
+            await assign_entity_to_area(hass, f"camera.{cam.slug}", cam_area_id)
 
     # Step 5: Add cards to Lovelace dashboard
     ok, msg = await update_dashboard(hass, cameras, target_path=dashboard_path)

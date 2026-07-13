@@ -140,12 +140,12 @@ def is_camera(schema: dict | None, dev: dict) -> bool:
     if schema:
         caps = schema.get("capabilities", {})
         dp_codes = {e.get("code", "") for e in schema.get("dp_map", [])}
-        # Explicitly a doorbell → exclude
-        if dp_codes & _DOORBELL_CODES:
-            return False
-        # Has PTZ or ONVIF → definitely a camera
+        # PTZ/ONVIF is definitive proof of a camera — check before doorbell exclusion
         if caps.get("ptz") or caps.get("onvif"):
             return True
+        # No PTZ/ONVIF: doorbell codes → exclude
+        if dp_codes & _DOORBELL_CODES:
+            return False
         # Has camera-specific DPs → camera
         return bool(dp_codes & _CAMERA_CODES) and dev.get("category") in ("sp", "ipc")
 
