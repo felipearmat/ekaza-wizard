@@ -137,12 +137,12 @@ def _cloud_devices_via_udp(creds: TuyaCredentials) -> list[dict]:
 
 
 def _cloud_devices(creds: TuyaCredentials, seed_device_id: str = "") -> list[dict]:
-    if seed_device_id:
-        devices = _cloud_devices_via_tinytuya(creds, seed_device_id)
-        if devices:
-            return devices
-        _LOGGER.warning("Cloud lookup with seed failed, falling back to UDP scan")
-
+    # Always try Cloud API first (works with project credentials alone)
+    devices = _cloud_devices_via_tinytuya(creds, seed_device_id)
+    if devices:
+        return devices
+    # Fallback: UDP broadcast scan (only works on host-mode networks)
+    _LOGGER.warning("Cloud API returned no devices, falling back to UDP scan")
     return _cloud_devices_via_udp(creds)
 
 
@@ -186,12 +186,16 @@ async def discover(creds: TuyaCredentials, hass=None, seed_device_id: str = "") 
         else:
             seen[slug] = 1
 
+        # tinytuya.Cloud.getdevices() returns "key"; direct API returns "local_key"
+        local_key = dev.get("local_key") or dev.get("key", "")
+        # Cloud IP may be WAN/public — keep empty so provisioner prompts for LAN IP
+        ip = dev.get("ip", "")
         cameras.append(CameraInfo(
             name=dev.get("name", device_id),
             slug=slug,
             device_id=device_id,
-            local_key=dev.get("local_key", ""),
-            ip=dev.get("ip", "unknown"),
+            local_key=local_key,
+            ip=ip,
             mac=dev.get("mac", ""),
             product_id=product_id,
             rtsp_password=creds.default_rtsp_password,
