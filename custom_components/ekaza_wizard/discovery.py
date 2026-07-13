@@ -51,7 +51,7 @@ def _tuya_get(base: str, path: str, access_id: str, secret: str, token: str | No
 
 
 def _cloud_devices_via_tinytuya(creds: TuyaCredentials, seed_device_id: str) -> list[dict]:
-    """Use tinytuya.Cloud with a known device_id to resolve the app user uid."""
+    """Resolve app user uid via seed device, then list all account devices."""
     try:
         cloud = tinytuya.Cloud(
             apiRegion=creds.region,
@@ -59,9 +59,32 @@ def _cloud_devices_via_tinytuya(creds: TuyaCredentials, seed_device_id: str) -> 
             apiSecret=creds.access_secret,
             apiDeviceID=seed_device_id or None,
         )
+
+        if seed_device_id:
+            # Step 1: look up the seed device to get the real app user uid
+            dev_r = cloud.cloudrequest(f"/v1.0/iot-03/devices/{seed_device_id}")
+            _LOGGER.debug("Seed device lookup: success=%s", dev_r.get("success"))
+            if dev_r.get("success") and isinstance(dev_r.get("result"), dict):
+                uid = dev_r["result"].get("uid", "")
+                if uid:
+                    # Step 2: list all devices for this app user
+                    list_r = cloud.cloudrequest(
+                        f"/v1.0/iot-03/devices?user_id={uid}&page_size=100&page_no=1"
+                    )
+                    if list_r.get("success"):
+                        devices = list_r.get("result", {}).get("list", [])
+                        _LOGGER.debug("Direct uid listing returned %d device(s)", len(devices))
+                        if devices:
+                            return devices
+                    _LOGGER.warning("Device list by uid failed: %s", list_r)
+            else:
+                _LOGGER.warning("Seed device lookup failed: %s", dev_r)
+
+        # Fallback: tinytuya built-in getdevices() (resolves uid internally)
+        _LOGGER.debug("Falling back to tinytuya.Cloud.getdevices()")
         raw = cloud.getdevices()
     except Exception as exc:
-        _LOGGER.warning("tinytuya.Cloud.getdevices() failed: %s", exc)
+        _LOGGER.warning("tinytuya.Cloud discovery failed: %s", exc)
         return []
 
     if isinstance(raw, list):
@@ -71,9 +94,9 @@ def _cloud_devices_via_tinytuya(creds: TuyaCredentials, seed_device_id: str) -> 
     else:
         devices = []
 
-    _LOGGER.debug("tinytuya.Cloud returned %d device(s)", len(devices))
+    _LOGGER.debug("tinytuya.Cloud.getdevices() returned %d device(s)", len(devices))
     if not devices:
-        _LOGGER.warning("No devices from tinytuya.Cloud (seed=%s)", (seed_device_id or "none")[:8])
+        _LOGGER.warning("No devices from Cloud (seed=%s)", (seed_device_id or "none")[:8])
     return devices
 
 

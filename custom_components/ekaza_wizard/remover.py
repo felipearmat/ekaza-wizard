@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er, device_registry as dr
 
 from . import adguard as adguard_mod
 from . import frigate as frigate_mod
@@ -60,6 +61,38 @@ async def _remove_from_localtuya(hass: HomeAssistant, device_id: str) -> tuple[b
     if removed:
         return True, "Removido do LocalTuya — entidades descarregadas"
     return True, "Dispositivo não encontrado no LocalTuya (já removido)"
+
+
+async def _cleanup_registries(hass: HomeAssistant, slug: str, device_id: str | None) -> str:
+    """Remove orphan entity and device registry entries for a removed camera."""
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    removed: list[str] = []
+
+    # LocalTuya entities: unique_id contains device_id (e.g. "local_{device_id}_{dp}")
+    if device_id:
+        for entry in list(ent_reg.entities.values()):
+            if entry.platform == "localtuya" and entry.unique_id and device_id in entry.unique_id:
+                ent_reg.async_remove(entry.entity_id)
+                removed.append(entry.entity_id)
+
+    # Script entities matching this slug (e.g. script.{slug}_ptz_up)
+    prefix = f"script.{slug}_"
+    for entry in list(ent_reg.entities.values()):
+        if entry.entity_id.startswith(prefix) and entry.platform == "script":
+            ent_reg.async_remove(entry.entity_id)
+            removed.append(entry.entity_id)
+
+    # Device registry entries registered by LocalTuya for this device_id
+    if device_id:
+        for device in list(dev_reg.devices.values()):
+            for identifier in device.identifiers:
+                if device_id in str(identifier):
+                    dev_reg.async_remove_device(device.id)
+                    removed.append(f"device:{device.id[:8]}")
+                    break
+
+    return f"Removidas {len(removed)} entidades/dispositivos orfãos do registry"
 
 
 async def block_smartlife_only(hass: HomeAssistant) -> AsyncGenerator[str, None]:
@@ -176,5 +209,12 @@ async def remove(
     # 8 — Remove card from Lovelace dashboard
     ok, msg = await dashboard_mod.remove_card(hass, slug)
     yield _sse("step", {"step": "dashboard", "ok": ok, "detail": msg})
+
+    # 9 — Clean up orphan entity/device registry entries
+    try:
+        detail = await _cleanup_registries(hass, slug, device_id)
+        yield _sse("step", {"step": "registry_cleanup", "ok": True, "detail": detail})
+    except Exception as exc:
+        yield _sse("step", {"step": "registry_cleanup", "ok": False, "detail": str(exc)})
 
     yield _sse("done", {"slug": slug, "name": name})
