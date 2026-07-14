@@ -189,6 +189,46 @@ async def assign_entity_to_area(hass: HomeAssistant, entity_id: str, area_id: st
         _LOGGER.warning("assign_entity_to_area(%s) failed (non-critical): %s", entity_id, exc)
 
 
+_CAMERA_STORE_KEY = "ekaza_wizard.cameras"
+_CAMERA_STORE_VERSION = 1
+
+
+async def save_cameras(hass: HomeAssistant, cameras: list) -> None:
+    """Persist camera list to HA storage (merge with existing by slug)."""
+    from homeassistant.helpers.storage import Store
+    from .models import CameraInfo
+    store = Store(hass, _CAMERA_STORE_VERSION, _CAMERA_STORE_KEY)
+    existing = await store.async_load() or {}
+    by_slug: dict = {c["slug"]: c for c in existing.get("cameras", [])}
+    for cam in cameras:
+        by_slug[cam.slug] = cam.model_dump()
+    await store.async_save({"cameras": list(by_slug.values())})
+
+
+async def load_cameras(hass: HomeAssistant) -> list:
+    """Load persisted camera list from HA storage."""
+    from homeassistant.helpers.storage import Store
+    from .models import CameraInfo
+    store = Store(hass, _CAMERA_STORE_VERSION, _CAMERA_STORE_KEY)
+    data = await store.async_load()
+    if not data:
+        return []
+    try:
+        return [CameraInfo(**c) for c in data.get("cameras", [])]
+    except Exception as exc:
+        _LOGGER.warning("load_cameras: failed to parse stored cameras: %s", exc)
+        return []
+
+
+async def remove_camera_from_store(hass: HomeAssistant, slug: str) -> None:
+    """Remove a single camera from persisted storage by slug."""
+    from homeassistant.helpers.storage import Store
+    store = Store(hass, _CAMERA_STORE_VERSION, _CAMERA_STORE_KEY)
+    data = await store.async_load() or {}
+    cameras = [c for c in data.get("cameras", []) if c.get("slug") != slug]
+    await store.async_save({"cameras": cameras})
+
+
 async def delete_input_boolean(
     hass: HomeAssistant, object_id: str
 ) -> tuple[bool, str]:

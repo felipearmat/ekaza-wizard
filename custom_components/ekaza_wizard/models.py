@@ -22,6 +22,9 @@ class CameraInfo(BaseModel):
     rtsp_username: str = "admin"
     rtsp_port: int = 554        # probed during provisioning (some models use 8554)
     online: bool = True
+    # camera → frigate mode: MITM proxy captures Tuya cloud MQTT events
+    proxy_enabled: bool = False
+    tuya_mqtt_domain: Optional[str] = None  # e.g. "m.tuyaus.com"; auto-discovered
 
 
 class DiscoverRequest(BaseModel):

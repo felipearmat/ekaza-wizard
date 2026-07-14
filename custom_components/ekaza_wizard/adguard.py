@@ -286,6 +286,149 @@ async def _backup_upload_and_restore(backup_bytes: bytes, addon_slug: str) -> tu
 
 
 # ---------------------------------------------------------------------------
+# AdGuard HTTP API helpers (direct to container — port 3000)
+# ---------------------------------------------------------------------------
+
+# Known Tuya MQTT broker domains, ordered by likelihood for BR/US region
+_TUYA_MQTT_DOMAINS = [
+    "m.tuyaus.com",
+    "m.tuyaeu.com",
+    "m.tuyacn.com",
+    "m.tuyain.com",
+    "a1.tuyaus.com",
+    "a1.tuyaeu.com",
+]
+
+
+async def _get_adguard_api_url() -> str | None:
+    """Return AdGuard container HTTP API base URL (http://{ip}:3000).
+
+    Uses the same Supervisor add-on info approach as Frigate IP resolution.
+    """
+    slug = await _get_adguard_slug()
+    if not slug:
+        return None
+    data = await _sup_get(f"/addons/{slug}/info")
+    if data:
+        ip = data.get("data", {}).get("ip_address")
+        if ip:
+            return f"http://{ip}:3000"
+    return None
+
+
+async def add_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
+    """Add a DNS rewrite rule in AdGuard: domain → answer.
+
+    Uses AdGuard's REST API directly (no backup/restart needed).
+    """
+    url = await _get_adguard_api_url()
+    if not url:
+        return False, "AdGuard HTTP API não acessível"
+    try:
+        async with aiohttp.ClientSession() as s:
+            r = await s.post(
+                f"{url}/control/rewrite/add",
+                json={"domain": domain, "answer": answer},
+                timeout=aiohttp.ClientTimeout(total=5),
+            )
+            if r.status in (200, 204):
+                _LOGGER.warning("AdGuard DNS rewrite adicionado: %s → %s", domain, answer)
+                return True, f"DNS rewrite: {domain} → {answer}"
+            text = await r.text()
+            return False, f"AdGuard retornou {r.status}: {text[:100]}"
+    except Exception as exc:
+        return False, f"Erro ao adicionar DNS rewrite: {exc}"
+
+
+async def remove_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
+    """Remove a DNS rewrite rule from AdGuard."""
+    url = await _get_adguard_api_url()
+    if not url:
+        return False, "AdGuard HTTP API não acessível"
+    try:
+        async with aiohttp.ClientSession() as s:
+            r = await s.post(
+                f"{url}/control/rewrite/delete",
+                json={"domain": domain, "answer": answer},
+                timeout=aiohttp.ClientTimeout(total=5),
+            )
+            if r.status in (200, 204):
+                _LOGGER.warning("AdGuard DNS rewrite removido: %s", domain)
+                return True, f"DNS rewrite removido: {domain}"
+            text = await r.text()
+            return False, f"AdGuard retornou {r.status}: {text[:100]}"
+    except Exception as exc:
+        return False, f"Erro ao remover DNS rewrite: {exc}"
+
+
+async def list_dns_rewrites() -> list[dict]:
+    """Return current AdGuard DNS rewrite rules."""
+    url = await _get_adguard_api_url()
+    if not url:
+        return []
+    try:
+        async with aiohttp.ClientSession() as s:
+            r = await s.get(
+                f"{url}/control/rewrite/list",
+                timeout=aiohttp.ClientTimeout(total=5),
+            )
+            if r.status == 200:
+                return await r.json()
+    except Exception as exc:
+        _LOGGER.debug("list_dns_rewrites failed: %s", exc)
+    return []
+
+
+async def discover_camera_mqtt_domain(camera_ip: str) -> str | None:
+    """Discover the Tuya MQTT broker domain used by a camera.
+
+    Strategy:
+    1. Query AdGuard query log for DNS queries from camera_ip matching Tuya patterns.
+    2. Fall back to probing known Tuya MQTT domains via TCP connect from HA.
+    """
+    url = await _get_adguard_api_url()
+    if url:
+        try:
+            async with aiohttp.ClientSession() as s:
+                r = await s.get(
+                    f"{url}/control/querylog",
+                    params={"search": camera_ip, "limit": 300},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                )
+                if r.status == 200:
+                    data = await r.json()
+                    for entry in data.get("data", []):
+                        name = entry.get("question", {}).get("name", "")
+                        if any(kw in name for kw in ("tuya", "smart321", "smartapp")):
+                            _LOGGER.debug(
+                                "Domínio MQTT Tuya descoberto via AdGuard log: %s", name
+                            )
+                            return name
+        except Exception as exc:
+            _LOGGER.debug("AdGuard querylog search failed: %s", exc)
+
+    # Fallback: TCP probe common domains (reachable from HA host)
+    import asyncio as _aio
+    import socket as _socket
+
+    def _probe(domain: str) -> bool:
+        try:
+            with _socket.create_connection((domain, 8883), timeout=3):
+                return True
+        except Exception:
+            return False
+
+    loop = _aio.get_running_loop()
+    for domain in _TUYA_MQTT_DOMAINS:
+        reachable = await loop.run_in_executor(None, _probe, domain)
+        if reachable:
+            _LOGGER.debug("Domínio MQTT Tuya descoberto via TCP probe: %s", domain)
+            return domain
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 

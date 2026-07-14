@@ -12,10 +12,13 @@ from homeassistant.core import HomeAssistant
 
 from . import frigate as frigate_mod
 from . import motion_bridge
+from . import tuya_proxy
+from .adguard import add_dns_rewrite, discover_camera_mqtt_domain
 from .dashboard import update_dashboard
-from .ha_helpers import assign_entity_to_area, create_input_boolean, ensure_area, hide_entity
+from .ha_helpers import assign_entity_to_area, create_input_boolean, ensure_area, hide_entity, save_cameras
 from .localtuya_flow import configure as configure_localtuya
 from .models import CameraInfo, TuyaCredentials
+from .motion_bridge import fire_event_for_slug
 from .scripts_gen import write_scripts
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,9 +74,12 @@ async def run(
     cameras: list[CameraInfo],
     dashboard_path: str | None = None,
 ) -> AsyncGenerator[str, None]:
+    proxy_cameras = [c for c in cameras if c.proxy_enabled]
     # Total steps = cameras * 4 (onvif + localtuya + scripts + motion_bridge_boolean)
     #             + 5 (frigate + reload_scripts + reload_frigate_integration + dashboard + bridge)
-    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 5})
+    #             + 2 per proxy camera (dns_rewrite + proxy_start)
+    extra = len(proxy_cameras) + (1 if proxy_cameras else 0)
+    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 5 + extra})
 
     # Step 0: Probe RTSP port + enable ONVIF + set password per camera
     for cam in cameras:
@@ -133,8 +139,45 @@ async def run(
     ok, msg = await update_dashboard(hass, cameras, target_path=dashboard_path)
     yield _sse("step", {"step": "dashboard", "ok": ok, "detail": msg})
 
-    # Step 6: Start motion bridge
-    motion_bridge.start(hass, cameras)
+    # Step 6: Start motion bridge (local Tuya push — cameras without proxy)
+    await motion_bridge.start(hass, cameras)
+    try:
+        await save_cameras(hass, cameras)
+        _LOGGER.warning("Cameras saved to storage: %s", [c.slug for c in cameras])
+    except Exception as exc:
+        _LOGGER.warning("save_cameras failed (bridge running but won't persist): %s", exc)
     yield _sse("step", {"step": "motion_bridge", "ok": True, "detail": "Bridge de movimento ativo"})
+
+    # Step 7: MITM proxy setup (camera → frigate mode only)
+    if proxy_cameras:
+        ha_ip = (hass.config.api.local_ip
+                 if hass.config.api and hass.config.api.local_ip
+                 else "127.0.0.1")
+
+        for cam in proxy_cameras:
+            # Auto-discover MQTT domain if not already set
+            if not cam.tuya_mqtt_domain:
+                domain = await discover_camera_mqtt_domain(cam.ip)
+                cam.tuya_mqtt_domain = domain or "m.tuyaus.com"
+
+            ok, msg = await add_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
+            yield _sse("step", {
+                "camera": cam.slug,
+                "step": "proxy_dns",
+                "ok": ok,
+                "detail": f"DNS rewrite {cam.tuya_mqtt_domain} → {ha_ip}: {msg}",
+            })
+
+        await tuya_proxy.start(hass, proxy_cameras, fire_event_for_slug)
+        # Persist updated tuya_mqtt_domain into storage
+        try:
+            await save_cameras(hass, cameras)
+        except Exception:
+            pass
+        yield _sse("step", {
+            "step": "proxy_start",
+            "ok": True,
+            "detail": f"Proxy MITM ativo na porta 8883 ({len(proxy_cameras)} câmera(s))",
+        })
 
     yield _sse("done", {"cameras": [c.slug for c in cameras]})

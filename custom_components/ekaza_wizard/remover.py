@@ -12,7 +12,9 @@ from homeassistant.helpers import entity_registry as er, device_registry as dr
 from . import adguard as adguard_mod
 from . import frigate as frigate_mod
 from . import motion_bridge
-from .ha_helpers import delete_input_boolean
+from . import tuya_proxy
+from .adguard import remove_dns_rewrite
+from .ha_helpers import delete_input_boolean, load_cameras, remove_camera_from_store
 from . import dashboard as dashboard_mod
 
 _LOGGER = logging.getLogger(__name__)
@@ -153,9 +155,28 @@ async def remove(
 
     yield _sse("start", {"slug": slug, "name": name})
 
-    # 1 — Stop motion bridge thread
+    # 1 — Stop motion bridge + proxy DNS rewrite (if camera → frigate mode)
     try:
         motion_bridge.stop_for(slug)
+
+        # If this camera used the MITM proxy, remove its DNS rewrite from AdGuard
+        all_cams = await load_cameras(hass)
+        removed_cam = next((c for c in all_cams if c.slug == slug), None)
+        if removed_cam and removed_cam.proxy_enabled and removed_cam.tuya_mqtt_domain:
+            ha_ip = (hass.config.api.local_ip
+                     if hass.config.api and hass.config.api.local_ip
+                     else "127.0.0.1")
+            await remove_dns_rewrite(removed_cam.tuya_mqtt_domain, ha_ip)
+
+        await remove_camera_from_store(hass, slug)
+
+        # Stop proxy entirely if no proxy-enabled cameras remain after removal
+        remaining = [c for c in all_cams if c.slug != slug and c.proxy_enabled]
+        if not remaining and tuya_proxy.is_running():
+            await tuya_proxy.stop()
+        elif remaining:
+            tuya_proxy.update_cameras(remaining)
+
         yield _sse("step", {"step": "bridge", "ok": True, "detail": "Bridge de movimento parado"})
     except Exception as exc:
         yield _sse("step", {"step": "bridge", "ok": False, "detail": str(exc)})

@@ -128,30 +128,23 @@ async def get(product_id: str, device_id: str | None = None, creds: dict | None 
 
 _CAMERA_CODES = {"basic_flip", "nightvision_mode", "record_switch", "motion_switch", "basic_indicator"}
 _DOORBELL_CODES = {"doorbell_active", "doorbell_call_countdown", "doorbell_volume"}
-_DOORBELL_NAMES = ("campainha", "doorbell", "interfone", "intercom", "hello+", "video door")
 
 
 def is_camera(schema: dict | None, dev: dict) -> bool:
-    name_lower = dev.get("name", "").lower()
-    # Exclude by name when no schema available
-    if any(k in name_lower for k in _DOORBELL_NAMES) and not schema:
-        return False
-
     if schema:
         caps = schema.get("capabilities", {})
         dp_codes = {e.get("code", "") for e in schema.get("dp_map", [])}
-        # PTZ/ONVIF is definitive proof of a camera — check before doorbell exclusion
+        # PTZ/ONVIF is definitive proof of a camera
         if caps.get("ptz") or caps.get("onvif"):
             return True
-        # No PTZ/ONVIF: doorbell codes → exclude
+        # Has doorbell-specific DPs but no PTZ/ONVIF → not a camera
         if dp_codes & _DOORBELL_CODES:
             return False
         # Has camera-specific DPs → camera
         return bool(dp_codes & _CAMERA_CODES) and dev.get("category") in ("sp", "ipc")
 
-    # No schema: fall back to category + name heuristics
-    if any(k in name_lower for k in _DOORBELL_NAMES):
-        return False
+    # No schema: fall back to category heuristics
     if dev.get("category") in ("sp", "ipc"):
         return True
+    name_lower = dev.get("name", "").lower()
     return any(k in name_lower for k in ("ekaza", "camera", "câmera", "cam", "cctv"))

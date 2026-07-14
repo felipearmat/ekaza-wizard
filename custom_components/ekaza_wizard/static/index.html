@@ -145,6 +145,28 @@
   #warning-modal h3 { color: var(--warn); margin-bottom: 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
   #warning-modal p { font-size: 0.85rem; color: var(--text); line-height: 1.7; margin-bottom: 20px; }
 
+  /* ── Proxy warning modal ── */
+  #proxy-warning-overlay {
+    display: none; position: fixed; inset: 0; z-index: 500;
+    background: rgba(0,0,0,.65); align-items: center; justify-content: center; padding: 16px;
+  }
+  #proxy-warning-overlay.open { display: flex; }
+  #proxy-warning-modal {
+    background: var(--surface); border: 2px solid var(--warn);
+    border-radius: var(--radius); max-width: 490px; width: 100%; padding: 24px;
+    animation: fadeIn .2s ease;
+  }
+  #proxy-warning-modal h3 { color: var(--warn); margin-bottom: 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+  #proxy-warning-modal p { font-size: 0.85rem; color: var(--text); line-height: 1.7; margin-bottom: 8px; }
+  #proxy-warning-modal ul { font-size: 0.83rem; color: var(--text-dim); line-height: 1.8; margin: 6px 0 14px 18px; }
+  .btn-warn-inline {
+    padding: 2px 8px; font-size: .75rem; font-weight: 600;
+    background: rgba(245,166,35,.15); color: var(--warn);
+    border: 1px solid rgba(245,166,35,.4); border-radius: 12px; cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-warn-inline:hover { background: rgba(245,166,35,.3); }
+
   /* ── Animations ── */
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { display: inline-block; animation: spin .7s linear infinite; }
@@ -177,8 +199,17 @@
   </div>
 </div>
 
+<!-- ── Proxy warning modal ── -->
+<div id="proxy-warning-overlay">
+  <div id="proxy-warning-modal">
+    <h3 id="proxy-warning-title">⚠️ AdGuard necessário</h3>
+    <div id="proxy-warning-body"></div>
+    <div class="actions" id="proxy-warning-actions" style="margin-top:0"></div>
+  </div>
+</div>
+
 <!-- ── Operation banner ── -->
-<div id="version-badge">eKaza Wizard v0.3.16</div>
+<div id="version-badge">eKaza Wizard v0.4.0</div>
 
 <div id="op-banner">
   <span class="spin">⏳</span>&nbsp;
@@ -542,10 +573,17 @@ function renderCameras() {
             value="${esc(c.ip)}" placeholder="192.168.x.x"
             style="font-family:monospace;width:130px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem${c.ip?'':';border-color:var(--err)'}"></td>
       <td><span class="badge ${c.online?'badge-ok':'badge-off'}">${c.online?'Online':'Offline'}</span></td>
+      <td>
+        <select class="cam-detect" data-idx="${i}" onchange="onDetectionChange(this, ${i})"
+          style="padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem">
+          <option value="frigate" ${!c.proxy_enabled ? 'selected' : ''}>Frigate (ML)</option>
+          <option value="proxy" ${c.proxy_enabled ? 'selected' : ''}>Câmera → Frigate</option>
+        </select>
+      </td>
     </tr>`).join('');
   wrap.innerHTML = `
     <table class="cam-table">
-      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP LAN</th><th>Status</th></tr></thead>
+      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP LAN</th><th>Status</th><th>Detecção</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${hasEmptyIp ? '<p style="color:var(--warn,#e67e22);font-size:.82rem;margin-top:8px">⚠ IP não detectado automaticamente — preencha o IP LAN de cada câmera antes de provisionar.</p>' : ''}`;
@@ -562,6 +600,97 @@ function getSelected() {
               });
 }
 
+// ── Proxy warning modal ──────────────────────────────────────────────────────
+let _adguardOk     = null;  // cached per session
+let _proxyWarnSlug = null;
+let _proxyWarnDomain = null;
+
+function closeProxyWarning() {
+  document.getElementById('proxy-warning-overlay').classList.remove('open');
+}
+
+function openProxyWarningModal(slug, domain) {
+  _proxyWarnSlug   = slug   || null;
+  _proxyWarnDomain = domain || null;
+  const title   = document.getElementById('proxy-warning-title');
+  const body    = document.getElementById('proxy-warning-body');
+  const actions = document.getElementById('proxy-warning-actions');
+
+  if (slug) {
+    // Installed camera — DNS rewrite missing
+    const domainStr = domain ? ` para <code style="background:var(--card);padding:1px 5px;border-radius:3px">${esc(domain)}</code>` : '';
+    title.textContent = '⚠️ DNS rewrite inativo';
+    body.innerHTML = `
+      <p>A câmera <strong>${esc(slug)}</strong> está no modo <strong>câmera → Frigate</strong>,
+      mas o DNS rewrite${domainStr} não está ativo no AdGuard.</p>
+      <p>Sem isso, a câmera conecta diretamente ao Tuya Cloud e <strong>nenhum evento de
+      movimento chega ao Frigate</strong> — nenhum clip é gravado.</p>
+      <ul>
+        <li>Clique em <strong>Ativar DNS rewrite</strong> para corrigir agora</li>
+        <li>Ou reinstale o AdGuard Home se ele não estiver acessível</li>
+      </ul>`;
+    actions.innerHTML = `
+      <button class="btn btn-primary" id="btn-activate-dns" onclick="activateProxyDns()">🔌 Ativar DNS rewrite</button>
+      <button class="btn btn-secondary" onclick="closeProxyWarning()">Fechar</button>`;
+  } else {
+    // Selection during provisioning — AdGuard not reachable
+    title.textContent = '⚠️ AdGuard não acessível';
+    body.innerHTML = `
+      <p>O modo <strong>câmera → Frigate</strong> requer o <strong>AdGuard Home</strong>
+      para redirecionar o tráfego MQTT da câmera para o proxy local.</p>
+      <p>O AdGuard não está acessível no momento. Sem ele:</p>
+      <ul>
+        <li>A câmera conecta diretamente ao Tuya Cloud normalmente</li>
+        <li>O Frigate <strong>não receberá eventos de movimento</strong></li>
+        <li>Nenhum clip será gravado para esta câmera</li>
+      </ul>
+      <p style="color:var(--text-dim)">Você pode provisionar assim mesmo e ativar o AdGuard depois.</p>`;
+    actions.innerHTML = `
+      <button class="btn btn-secondary" onclick="closeProxyWarning()">Entendi, continuar assim mesmo</button>
+      <button class="btn btn-primary" onclick="switchTab('privacy'); closeProxyWarning()">🛡️ Ir para Privacidade</button>`;
+  }
+
+  document.getElementById('proxy-warning-overlay').classList.add('open');
+}
+
+async function activateProxyDns() {
+  if (!_proxyWarnSlug) return;
+  const btn = document.getElementById('btn-activate-dns');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ativando…'; }
+  try {
+    const r = await fetch(`${API}/proxy/toggle`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug: _proxyWarnSlug, enable: true}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      closeProxyWarning();
+      await loadInstalledCameras();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = `❌ ${esc(d.detail || 'Erro')}`; }
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '❌ Erro de rede'; }
+  }
+}
+
+async function onDetectionChange(sel, idx) {
+  _cameras[idx].proxy_enabled = (sel.value === 'proxy');
+  if (sel.value !== 'proxy') return;
+  // Lazy-check AdGuard once per session
+  if (_adguardOk === null) {
+    try {
+      const r = await fetch(`${API}/adguard/check`);
+      const d = await r.json();
+      _adguardOk = !!d.ok;
+    } catch (_) {
+      _adguardOk = false;
+    }
+  }
+  if (!_adguardOk) openProxyWarningModal(null, null);
+}
+
 // ── Provision ────────────────────────────────────────────────────────────────
 const STEP_LABELS = {
   onvif:          'Habilitando ONVIF',
@@ -572,6 +701,8 @@ const STEP_LABELS = {
   restart_frigate:'Reiniciando Frigate',
   dashboard:      'Atualizando dashboard',
   motion_bridge:  'Iniciando bridge',
+  proxy_dns:      'Ativando DNS rewrite…',
+  proxy_start:    'Iniciando proxy MITM…',
 };
 
 async function doProvision() {
@@ -712,9 +843,27 @@ async function loadInstalledCameras() {
   const list = document.getElementById('installed-list');
   list.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem"><span class="spin">⏳</span> Carregando…</p>';
   try {
-    const r = await fetch(`${API}/cameras`);
-    const data = await r.json();
-    _installedCameras = data.cameras || [];
+    const [camResp, proxyResp] = await Promise.all([
+      fetch(`${API}/cameras`).then(r => r.json()),
+      fetch(`${API}/proxy/status`).then(r => r.json()).catch(() => null),
+    ]);
+    _installedCameras = camResp.cameras || [];
+
+    // Merge proxy status into each camera entry
+    if (proxyResp) {
+      const proxyMap = {};
+      for (const pc of (proxyResp.cameras || [])) proxyMap[pc.slug] = pc;
+      const activeRewrites = new Set((proxyResp.dns_rewrites || []).map(r => r.domain));
+      for (const cam of _installedCameras) {
+        const pc = proxyMap[cam.slug];
+        if (pc) {
+          cam.proxy_enabled    = pc.enabled;
+          cam.tuya_mqtt_domain = pc.domain || '';
+          cam.proxy_dns_active = !!(pc.domain && activeRewrites.has(pc.domain));
+        }
+      }
+    }
+
     renderInstalledCameras();
   } catch (e) {
     list.innerHTML = `<p style="color:var(--err)">Erro ao carregar: ${esc(e.message)}</p>`;
@@ -729,7 +878,17 @@ function renderInstalledCameras() {
     </p>`;
     return;
   }
-  list.innerHTML = _installedCameras.map((cam, i) => `
+  list.innerHTML = _installedCameras.map((cam, i) => {
+    const proxyBadge = cam.proxy_enabled
+      ? `<span class="badge badge-ok">Câmera→Frigate</span>`
+      : '';
+    const dnsWarning = cam.proxy_enabled && !cam.proxy_dns_active
+      ? `<button class="btn-warn-inline"
+           onclick="openProxyWarningModal('${esc(cam.slug)}', '${esc(cam.tuya_mqtt_domain||'')}')">
+           ⚠️ DNS inativo
+         </button>`
+      : '';
+    return `
     <div class="inst-row fade-in" id="cam-row-${i}">
       <div class="inst-info">
         <div class="inst-name">${esc(cam.name)}</div>
@@ -739,12 +898,14 @@ function renderInstalledCameras() {
           <span class="badge badge-ok">Frigate</span>
           <span class="badge ${cam.has_localtuya ? 'badge-ok' : 'badge-dim'}">${cam.has_localtuya ? 'LocalTuya ✓' : 'LocalTuya ?'}</span>
           <span class="badge ${cam.has_scripts   ? 'badge-ok' : 'badge-dim'}">${cam.has_scripts   ? 'Scripts PTZ ✓' : 'Scripts PTZ ?'}</span>
+          ${proxyBadge}${dnsWarning}
         </div>
       </div>
       <div class="inst-actions" id="cam-actions-${i}">
         <button class="btn btn-sm btn-danger" onclick="confirmRemove(${i})">🗑️ Remover</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function confirmRemove(idx) {

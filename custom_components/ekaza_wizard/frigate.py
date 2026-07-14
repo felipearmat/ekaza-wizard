@@ -48,6 +48,18 @@ async def _frigate_base() -> str:
 
 
 def _camera_block(cam: CameraInfo) -> dict:
+    if cam.proxy_enabled:
+        # camera → frigate mode: camera's own AI drives recording via MITM proxy.
+        # ML detection disabled to save CPU — the proxy fires manual events instead.
+        return {
+            "ffmpeg": {
+                "hwaccel_args": [],
+                "inputs": [{"path": f"rtsp://127.0.0.1:8554/{cam.slug}", "roles": ["record"]}],
+            },
+            "detect": {"enabled": False},
+            "record": {"enabled": True},
+        }
+    # Default: Frigate ML detection
     return {
         "ffmpeg": {
             "hwaccel_args": [],

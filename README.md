@@ -21,7 +21,7 @@ Integração para **[Home Assistant OS](https://www.home-assistant.io/installati
 
 | Componente | Para quê |
 |---|---|
-| **[AdGuard Home](https://github.com/hassio-addons/addon-adguard-home)** | Aba Privacidade — bloquear servidores Tuya/SmartLife na rede local |
+| **[AdGuard Home](https://github.com/hassio-addons/addon-adguard-home)** | Aba Privacidade — bloquear servidores Tuya/SmartLife; também necessário para o modo **câmera → Frigate** |
 
 ---
 
@@ -89,6 +89,69 @@ Selecione as câmeras, ajuste os nomes e clique em **Provisionar**. O wizard exe
 | **Scripts PTZ** | Gera scripts `ptz_up/down/left/right/home` + `zoom_in/out` |
 | **Motion Bridge** | Monitora DP de movimento da câmera e dispara eventos no Frigate |
 | **Dashboard** | Adiciona card da câmera no dashboard Lovelace selecionado |
+| **Proxy MITM** *(câmera → Frigate)* | Veja abaixo |
+
+---
+
+### Modo câmera → Frigate (detecção via IA embarcada)
+
+Por padrão, o Frigate usa seu próprio modelo de ML para detectar objetos (modo **Frigate**). O modo **câmera → Frigate** é uma alternativa que usa a **IA embarcada da câmera** para detectar movimento, eliminando o custo de CPU no servidor.
+
+#### Como funciona
+
+A câmera envia alertas de movimento ao Tuya Cloud via MQTT sobre TLS (porta 8883). O wizard instala um **proxy MITM transparente** que intercepta essa conexão:
+
+```
+Câmera → [AdGuard redireciona DNS] → Proxy MITM (HA) → Tuya Cloud
+                                            │
+                                     detecta DP 185 (alarm_message)
+                                            │
+                                     POST /api/events/{slug}/motion/create
+                                            │
+                                     Frigate grava clip ✓
+```
+
+O proxy usa um certificado TLS auto-assinado gerado dinamicamente via SNI. Como câmeras IoT Tuya raramente validam a cadeia de certificados, a conexão é aceita. O tráfego é integralmente repassado ao Tuya Cloud real — as notificações no Smart Life continuam funcionando.
+
+#### Pré-requisito
+
+**AdGuard Home** instalado e acessível. Usado para redirecionar o domínio MQTT da Tuya para o IP do HA.
+
+#### Ativar no provisionamento
+
+No wizard, ao provisionar uma câmera, marque **câmera → Frigate** na lista. O wizard:
+1. Auto-descobre o domínio MQTT da câmera (via log AdGuard ou probe TCP)
+2. Adiciona DNS rewrite no AdGuard: `m.tuyaus.com → {HA IP}`
+3. Inicia o proxy na porta 8883
+4. Configura o Frigate sem ML detection para esta câmera (economia de CPU)
+
+#### Ativar / desativar depois do provisionamento
+
+Via API REST (sem reprovisionamento):
+
+```bash
+# Ativar proxy para uma câmera
+curl -X POST http://{HA}:8123/api/ekaza_wizard/proxy/toggle \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "nome_camera", "enable": true}'
+
+# Desativar
+curl -X POST http://{HA}:8123/api/ekaza_wizard/proxy/toggle \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "nome_camera", "enable": false}'
+
+# Ver estado atual
+curl http://{HA}:8123/api/ekaza_wizard/proxy/status
+```
+
+#### Modos de detecção disponíveis
+
+| Modo | Como ativar | Detecção | CPU no servidor |
+|---|---|---|---|
+| **Frigate** (padrão) | `proxy_enabled: false` | ML Frigate | Alto (modelos YOLO) |
+| **câmera → Frigate** | `proxy_enabled: true` | IA embarcada na câmera | Mínimo |
+
+> **Nota:** Se a câmera valida a cadeia de certificados TLS do broker MQTT (incomum em câmeras IoT baratas), o proxy não conseguirá interceptar a conexão e a câmera continuará enviando eventos somente ao Tuya Cloud.
 
 ---
 

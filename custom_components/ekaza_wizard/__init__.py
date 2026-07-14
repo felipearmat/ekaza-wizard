@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 
 from . import adguard as adguard_mod
 from . import check as check_mod
-from . import discovery, motion_bridge, provisioner, remover
+from . import discovery, motion_bridge, provisioner, remover, tuya_proxy
 from .dashboard import list_dashboards
 from .const import (
     CONF_RTSP_PASSWORD,
@@ -53,9 +53,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(EkazaAdGuardStatusView(hass))
     hass.http.register_view(EkazaSmartLifeUnblockView(hass))
     hass.http.register_view(EkazaSmartLifeBlockView(hass))
+    hass.http.register_view(EkazaProxyToggleView(hass))
+    hass.http.register_view(EkazaProxyStatusView(hass))
 
     from . import frigate_syncer
+    from .ha_helpers import load_cameras
+    from .motion_bridge import fire_event_for_slug
     hass.loop.create_task(frigate_syncer.setup(hass))
+
+    async def _restart_bridge_and_proxy() -> None:
+        cameras = await load_cameras(hass)
+        if cameras:
+            await motion_bridge.start(hass, cameras)
+            _LOGGER.warning(
+                "Motion bridge restarted for %d camera(s) after HA startup", len(cameras)
+            )
+            proxy_cams = [c for c in cameras if c.proxy_enabled]
+            if proxy_cams:
+                await tuya_proxy.start(hass, proxy_cams, fire_event_for_slug)
+                _LOGGER.warning(
+                    "Tuya proxy restarted for %d camera(s) after HA startup", len(proxy_cams)
+                )
+        else:
+            _LOGGER.warning("Motion bridge: no saved cameras found on startup")
+
+    hass.loop.create_task(_restart_bridge_and_proxy())
 
     try:
         async_register_built_in_panel(
@@ -74,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     motion_bridge.stop()
+    await tuya_proxy.stop()
     async_remove_panel(hass, "ekaza-wizard")
     return True
 
@@ -410,6 +433,109 @@ class EkazaAdGuardStatusView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         return self.json(await adguard_mod.get_rules_status())
+
+
+class EkazaProxyStatusView(HomeAssistantView):
+    """GET /api/ekaza_wizard/proxy/status — proxy running state + DNS rewrites."""
+    url = "/api/ekaza_wizard/proxy/status"
+    name = "api:ekaza_wizard:proxy_status"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def get(self, request: web.Request) -> web.Response:
+        from .adguard import list_dns_rewrites
+        from .ha_helpers import load_cameras
+        cameras = await load_cameras(self._hass)
+        proxy_cams = [
+            {"slug": c.slug, "domain": c.tuya_mqtt_domain, "enabled": c.proxy_enabled}
+            for c in cameras
+        ]
+        rewrites = await list_dns_rewrites()
+        ekaza_rewrites = [r for r in rewrites if any(
+            c.tuya_mqtt_domain == r.get("domain") for c in cameras if c.proxy_enabled
+        )]
+        return self.json({
+            "proxy_running": tuya_proxy.is_running(),
+            "cameras": proxy_cams,
+            "dns_rewrites": ekaza_rewrites,
+        })
+
+
+class EkazaProxyToggleView(HomeAssistantView):
+    """POST /api/ekaza_wizard/proxy/toggle — enable or disable proxy for a camera.
+
+    Body: {"slug": "...", "enable": true}
+
+    Enabling:  adds AdGuard DNS rewrite + marks camera proxy_enabled=True in storage.
+    Disabling: removes DNS rewrite + marks proxy_enabled=False; stops proxy if no cams left.
+    """
+    url = "/api/ekaza_wizard/proxy/toggle"
+    name = "api:ekaza_wizard:proxy_toggle"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return self.json({"error": "JSON inválido"}, status_code=400)
+
+        slug = body.get("slug", "").strip()
+        enable = bool(body.get("enable", True))
+        if not slug:
+            return self.json({"error": "'slug' obrigatório"}, status_code=422)
+
+        from .adguard import add_dns_rewrite, discover_camera_mqtt_domain, remove_dns_rewrite
+        from .ha_helpers import load_cameras, save_cameras
+        from .motion_bridge import fire_event_for_slug
+
+        cameras = await load_cameras(self._hass)
+        cam = next((c for c in cameras if c.slug == slug), None)
+        if not cam:
+            return self.json({"error": f"Câmera '{slug}' não encontrada no storage"}, status_code=404)
+
+        ha_ip = (
+            self._hass.config.api.local_ip
+            if self._hass.config.api and self._hass.config.api.local_ip
+            else "127.0.0.1"
+        )
+
+        if enable:
+            if not cam.tuya_mqtt_domain:
+                domain = await discover_camera_mqtt_domain(cam.ip)
+                cam.tuya_mqtt_domain = domain or "m.tuyaus.com"
+            cam.proxy_enabled = True
+            ok, msg = await add_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
+            proxy_cams = [c for c in cameras if c.proxy_enabled]
+            await tuya_proxy.start(self._hass, proxy_cams, fire_event_for_slug)
+        else:
+            cam.proxy_enabled = False
+            if cam.tuya_mqtt_domain:
+                ok, msg = await remove_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
+            else:
+                ok, msg = True, "Sem DNS rewrite para remover"
+            remaining = [c for c in cameras if c.proxy_enabled]
+            if not remaining and tuya_proxy.is_running():
+                await tuya_proxy.stop()
+            else:
+                tuya_proxy.update_cameras(remaining)
+
+        try:
+            await save_cameras(self._hass, cameras)
+        except Exception as exc:
+            _LOGGER.warning("proxy toggle: save_cameras failed: %s", exc)
+
+        return self.json({
+            "ok": ok,
+            "slug": slug,
+            "proxy_enabled": cam.proxy_enabled,
+            "tuya_mqtt_domain": cam.tuya_mqtt_domain,
+            "detail": msg,
+        })
 
 
 class EkazaProvisionView(HomeAssistantView):
