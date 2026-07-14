@@ -1,12 +1,13 @@
-"""AdGuard Home API client for SmartLife/Tuya cloud blocking.
+"""AdGuard Home API client for SmartLife/Tuya cloud blocking and DNS rewrites.
 
-Primary mechanism: supervisor backup API (create → download → modify YAML → upload → restore).
-This is used because AdGuard binds its HTTP API only to localhost (unreachable from HA container).
+All operations use the Supervisor backup API (create → download → modify YAML → upload → restore)
+because AdGuard binds its HTTP API only to localhost, unreachable from the HA container.
 """
 from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import tarfile
@@ -43,6 +44,22 @@ _STATUS_FILE = Path("/config/.ekaza_adguard_status")
 
 # Cached slug after first successful detection
 _adguard_slug: str | None = None
+
+_REWRITES_CACHE_FILE = Path("/config/.ekaza_adguard_rewrites")
+
+
+def _read_cached_rewrites() -> list[dict]:
+    try:
+        return json.loads(_REWRITES_CACHE_FILE.read_text())
+    except Exception:
+        return []
+
+
+def _write_cached_rewrites(rewrites: list[dict]) -> None:
+    try:
+        _REWRITES_CACHE_FILE.write_text(json.dumps(rewrites))
+    except Exception as exc:
+        _LOGGER.warning("Could not write rewrite cache: %s", exc)
 
 
 async def _get_adguard_slug() -> str:
@@ -105,8 +122,8 @@ def _extract_yaml_from_backup(backup_bytes: bytes, addon_slug: str) -> bytes:
     return yml_fobj.read()
 
 
-def _modify_yaml_in_backup(backup_bytes: bytes, new_rules: list[str], addon_slug: str) -> bytes:
-    """Return modified backup bytes with updated user_rules in AdGuardHome.yaml."""
+def _modify_adguard_yaml(backup_bytes: bytes, modifier, addon_slug: str) -> bytes:
+    """Call modifier(config_dict) in place and return modified backup bytes."""
     outer = tarfile.open(fileobj=io.BytesIO(backup_bytes))
 
     inner_fobj = outer.extractfile(f"{addon_slug}.tar.gz")
@@ -117,7 +134,7 @@ def _modify_yaml_in_backup(backup_bytes: bytes, new_rules: list[str], addon_slug
             fobj = inner.extractfile(member)
             if member.name == "data/adguard/AdGuardHome.yaml" and fobj:
                 config = yaml.safe_load(fobj.read())
-                config["user_rules"] = new_rules
+                modifier(config)
                 new_content = yaml.dump(
                     config, default_flow_style=False, allow_unicode=True
                 ).encode("utf-8")
@@ -147,6 +164,13 @@ def _modify_yaml_in_backup(backup_bytes: bytes, new_rules: list[str], addon_slug
             else:
                 new_outer.addfile(member)
     return new_outer_buf.getvalue()
+
+
+def _modify_yaml_in_backup(backup_bytes: bytes, new_rules: list[str], addon_slug: str) -> bytes:
+    """Return modified backup bytes with updated user_rules in AdGuardHome.yaml."""
+    def _patch(cfg: dict) -> None:
+        cfg["user_rules"] = new_rules
+    return _modify_adguard_yaml(backup_bytes, _patch, addon_slug)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +310,7 @@ async def _backup_upload_and_restore(backup_bytes: bytes, addon_slug: str) -> tu
 
 
 # ---------------------------------------------------------------------------
-# AdGuard HTTP API helpers (direct to container — port 3000)
+# DNS Rewrite helpers (backup-based — AdGuard API is localhost-only)
 # ---------------------------------------------------------------------------
 
 # Known Tuya MQTT broker domains, ordered by likelihood for BR/US region
@@ -300,115 +324,149 @@ _TUYA_MQTT_DOMAINS = [
 ]
 
 
-async def _get_adguard_api_url() -> str | None:
-    """Return AdGuard container HTTP API base URL (http://{ip}:3000).
-
-    Uses the same Supervisor add-on info approach as Frigate IP resolution.
-    """
-    slug = await _get_adguard_slug()
-    if not slug:
-        return None
-    data = await _sup_get(f"/addons/{slug}/info")
-    if data:
-        ip = data.get("data", {}).get("ip_address")
-        if ip:
-            return f"http://{ip}:3000"
-    return None
-
-
 async def add_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
-    """Add a DNS rewrite rule in AdGuard: domain → answer.
+    """Add a DNS rewrite via AdGuard backup/restore (~40s, restarts AdGuard briefly)."""
+    addon_slug = await _get_adguard_slug()
+    if not addon_slug:
+        return False, "Add-on AdGuard não encontrado"
 
-    Uses AdGuard's REST API directly (no backup/restart needed).
-    """
-    url = await _get_adguard_api_url()
-    if not url:
-        return False, "AdGuard HTTP API não acessível"
+    slug, backup_bytes = await _backup_create(addon_slug)
+    if not backup_bytes:
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, "Falha ao criar backup do AdGuard"
+
     try:
-        async with aiohttp.ClientSession() as s:
-            r = await s.post(
-                f"{url}/control/rewrite/add",
-                json={"domain": domain, "answer": answer},
-                timeout=aiohttp.ClientTimeout(total=5),
-            )
-            if r.status in (200, 204):
-                _LOGGER.warning("AdGuard DNS rewrite adicionado: %s → %s", domain, answer)
-                return True, f"DNS rewrite: {domain} → {answer}"
-            text = await r.text()
-            return False, f"AdGuard retornou {r.status}: {text[:100]}"
+        yaml_bytes = _extract_yaml_from_backup(backup_bytes, addon_slug)
+        config = yaml.safe_load(yaml_bytes)
+        rewrites: list[dict] = list(config.get("rewrites") or [])
     except Exception as exc:
-        return False, f"Erro ao adicionar DNS rewrite: {exc}"
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, f"Falha ao ler config do AdGuard: {exc}"
+
+    if any(r.get("domain") == domain and r.get("answer") == answer for r in rewrites):
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        _write_cached_rewrites(rewrites)
+        return True, f"DNS rewrite já existe: {domain} → {answer}"
+
+    rewrites.append({"domain": domain, "answer": answer})
+
+    def _patch(cfg: dict) -> None:
+        cfg["rewrites"] = rewrites
+
+    try:
+        modified = _modify_adguard_yaml(backup_bytes, _patch, addon_slug)
+    except Exception as exc:
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, f"Falha ao modificar backup: {exc}"
+
+    if slug:
+        await _sup_delete(f"/backups/{slug}")
+
+    ok, msg = await _backup_upload_and_restore(modified, addon_slug)
+    if ok:
+        _write_cached_rewrites(rewrites)
+        _LOGGER.warning("DNS rewrite adicionado: %s → %s", domain, answer)
+        return True, f"DNS rewrite adicionado: {domain} → {answer}"
+    return False, f"Falha ao restaurar backup AdGuard: {msg}"
 
 
 async def remove_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
-    """Remove a DNS rewrite rule from AdGuard."""
-    url = await _get_adguard_api_url()
-    if not url:
-        return False, "AdGuard HTTP API não acessível"
+    """Remove a DNS rewrite via AdGuard backup/restore (~40s, restarts AdGuard briefly)."""
+    addon_slug = await _get_adguard_slug()
+    if not addon_slug:
+        return False, "Add-on AdGuard não encontrado"
+
+    slug, backup_bytes = await _backup_create(addon_slug)
+    if not backup_bytes:
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, "Falha ao criar backup do AdGuard"
+
     try:
-        async with aiohttp.ClientSession() as s:
-            r = await s.post(
-                f"{url}/control/rewrite/delete",
-                json={"domain": domain, "answer": answer},
-                timeout=aiohttp.ClientTimeout(total=5),
-            )
-            if r.status in (200, 204):
-                _LOGGER.warning("AdGuard DNS rewrite removido: %s", domain)
-                return True, f"DNS rewrite removido: {domain}"
-            text = await r.text()
-            return False, f"AdGuard retornou {r.status}: {text[:100]}"
+        yaml_bytes = _extract_yaml_from_backup(backup_bytes, addon_slug)
+        config = yaml.safe_load(yaml_bytes)
+        rewrites: list[dict] = list(config.get("rewrites") or [])
     except Exception as exc:
-        return False, f"Erro ao remover DNS rewrite: {exc}"
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, f"Falha ao ler config do AdGuard: {exc}"
+
+    new_rewrites = [
+        r for r in rewrites
+        if not (r.get("domain") == domain and r.get("answer") == answer)
+    ]
+
+    if len(new_rewrites) == len(rewrites):
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        _write_cached_rewrites(rewrites)
+        return True, f"DNS rewrite não encontrado (ok): {domain}"
+
+    def _patch(cfg: dict) -> None:
+        cfg["rewrites"] = new_rewrites
+
+    try:
+        modified = _modify_adguard_yaml(backup_bytes, _patch, addon_slug)
+    except Exception as exc:
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, f"Falha ao modificar backup: {exc}"
+
+    if slug:
+        await _sup_delete(f"/backups/{slug}")
+
+    ok, msg = await _backup_upload_and_restore(modified, addon_slug)
+    if ok:
+        _write_cached_rewrites(new_rewrites)
+        _LOGGER.warning("DNS rewrite removido: %s", domain)
+        return True, f"DNS rewrite removido: {domain}"
+    return False, f"Falha ao restaurar backup AdGuard: {msg}"
 
 
 async def list_dns_rewrites() -> list[dict]:
-    """Return current AdGuard DNS rewrite rules."""
-    url = await _get_adguard_api_url()
-    if not url:
-        return []
+    """Return cached AdGuard DNS rewrite rules (set by add/remove or sync_dns_rewrites)."""
+    return _read_cached_rewrites()
+
+
+async def sync_dns_rewrites() -> tuple[bool, list[dict]]:
+    """Read current DNS rewrites from AdGuard backup and update cache.
+
+    Creates a temporary backup, reads AdGuardHome.yaml, updates the local cache,
+    then deletes the backup. Takes ~20s but does NOT restart AdGuard.
+    """
+    addon_slug = await _get_adguard_slug()
+    if not addon_slug:
+        return False, []
+
+    slug, backup_bytes = await _backup_create(addon_slug)
+    if not backup_bytes:
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, []
+
     try:
-        async with aiohttp.ClientSession() as s:
-            r = await s.get(
-                f"{url}/control/rewrite/list",
-                timeout=aiohttp.ClientTimeout(total=5),
-            )
-            if r.status == 200:
-                return await r.json()
+        yaml_bytes = _extract_yaml_from_backup(backup_bytes, addon_slug)
+        config = yaml.safe_load(yaml_bytes)
+        rewrites: list[dict] = list(config.get("rewrites") or [])
     except Exception as exc:
-        _LOGGER.debug("list_dns_rewrites failed: %s", exc)
-    return []
+        _LOGGER.warning("sync_dns_rewrites: failed to read YAML: %s", exc)
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+        return False, []
+    finally:
+        if slug:
+            await _sup_delete(f"/backups/{slug}")
+
+    _write_cached_rewrites(rewrites)
+    return True, rewrites
 
 
 async def discover_camera_mqtt_domain(camera_ip: str) -> str | None:
-    """Discover the Tuya MQTT broker domain used by a camera.
-
-    Strategy:
-    1. Query AdGuard query log for DNS queries from camera_ip matching Tuya patterns.
-    2. Fall back to probing known Tuya MQTT domains via TCP connect from HA.
-    """
-    url = await _get_adguard_api_url()
-    if url:
-        try:
-            async with aiohttp.ClientSession() as s:
-                r = await s.get(
-                    f"{url}/control/querylog",
-                    params={"search": camera_ip, "limit": 300},
-                    timeout=aiohttp.ClientTimeout(total=5),
-                )
-                if r.status == 200:
-                    data = await r.json()
-                    for entry in data.get("data", []):
-                        name = entry.get("question", {}).get("name", "")
-                        if any(kw in name for kw in ("tuya", "smart321", "smartapp")):
-                            _LOGGER.debug(
-                                "Domínio MQTT Tuya descoberto via AdGuard log: %s", name
-                            )
-                            return name
-        except Exception as exc:
-            _LOGGER.debug("AdGuard querylog search failed: %s", exc)
-
-    # Fallback: TCP probe common domains (reachable from HA host)
-    import asyncio as _aio
+    """Discover the Tuya MQTT broker domain used by a camera via TCP probe."""
     import socket as _socket
 
     def _probe(domain: str) -> bool:
@@ -418,7 +476,7 @@ async def discover_camera_mqtt_domain(camera_ip: str) -> str | None:
         except Exception:
             return False
 
-    loop = _aio.get_running_loop()
+    loop = asyncio.get_running_loop()
     for domain in _TUYA_MQTT_DOMAINS:
         reachable = await loop.run_in_executor(None, _probe, domain)
         if reachable:

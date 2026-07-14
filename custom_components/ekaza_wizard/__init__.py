@@ -55,6 +55,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(EkazaSmartLifeBlockView(hass))
     hass.http.register_view(EkazaProxyToggleView(hass))
     hass.http.register_view(EkazaProxyStatusView(hass))
+    hass.http.register_view(EkazaAdguardRewriteSyncView(hass))
+    hass.http.register_view(EkazaAdguardRewriteView(hass))
 
     from . import frigate_syncer
     from .ha_helpers import load_cameras
@@ -536,6 +538,76 @@ class EkazaProxyToggleView(HomeAssistantView):
             "tuya_mqtt_domain": cam.tuya_mqtt_domain,
             "detail": msg,
         })
+
+
+class EkazaAdguardRewriteSyncView(HomeAssistantView):
+    """GET /api/ekaza_wizard/adguard/rewrites/sync — read rewrites from AdGuard backup.
+
+    Creates a temporary backup, reads AdGuardHome.yaml, updates the local cache,
+    and returns the current rewrite list. Takes ~20s but does NOT restart AdGuard.
+    """
+    url = "/api/ekaza_wizard/adguard/rewrites/sync"
+    name = "api:ekaza_wizard:adguard_rewrites_sync"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def get(self, request: web.Request) -> web.Response:
+        from .adguard import sync_dns_rewrites
+        ok, rewrites = await sync_dns_rewrites()
+        return self.json({"ok": ok, "rewrites": rewrites, "count": len(rewrites)})
+
+
+class EkazaAdguardRewriteView(HomeAssistantView):
+    """POST /api/ekaza_wizard/adguard/rewrite — add or remove DNS rewrite only.
+
+    Body: {"slug": "...", "enable": true}
+
+    Unlike proxy/toggle, this does NOT change proxy_enabled or touch the MITM proxy
+    process — it only manages the AdGuard DNS rewrite rule for the camera's MQTT domain.
+    """
+    url = "/api/ekaza_wizard/adguard/rewrite"
+    name = "api:ekaza_wizard:adguard_rewrite"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return self.json({"error": "JSON inválido"}, status_code=400)
+
+        slug   = body.get("slug", "").strip()
+        enable = bool(body.get("enable", True))
+        if not slug:
+            return self.json({"error": "'slug' obrigatório"}, status_code=422)
+
+        from .adguard import add_dns_rewrite, remove_dns_rewrite
+        from .ha_helpers import load_cameras
+
+        cameras = await load_cameras(self._hass)
+        cam = next((c for c in cameras if c.slug == slug), None)
+        if not cam:
+            return self.json({"error": f"Câmera '{slug}' não encontrada"}, status_code=404)
+
+        if not cam.tuya_mqtt_domain:
+            return self.json({"error": "Domínio MQTT não descoberto para esta câmera"}, status_code=422)
+
+        ha_ip = (
+            self._hass.config.api.local_ip
+            if self._hass.config.api and self._hass.config.api.local_ip
+            else "127.0.0.1"
+        )
+
+        if enable:
+            ok, msg = await add_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
+        else:
+            ok, msg = await remove_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
+
+        return self.json({"ok": ok, "slug": slug, "domain": cam.tuya_mqtt_domain, "detail": msg})
 
 
 class EkazaProvisionView(HomeAssistantView):

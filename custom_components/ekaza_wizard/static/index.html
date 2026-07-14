@@ -209,7 +209,7 @@
 </div>
 
 <!-- ── Operation banner ── -->
-<div id="version-badge">eKaza Wizard v0.4.0</div>
+<div id="version-badge">eKaza Wizard v0.4.1</div>
 
 <div id="op-banner">
   <span class="spin">⏳</span>&nbsp;
@@ -419,6 +419,38 @@
       <div id="privacy-log" class="hidden" style="background:#0a0a1a;border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:monospace;font-size:0.82rem;max-height:200px;overflow-y:auto;margin-top:12px;"></div>
     </div>
 
+    <!-- DNS Rewrite — Proxy MQTT (feature independente do bloqueio acima) -->
+    <div class="card" style="margin-top:18px">
+      <h2>🔀 DNS Rewrite — Proxy MQTT</h2>
+      <p style="font-size:0.83rem;color:var(--text-dim);margin-bottom:12px;line-height:1.6;">
+        Redireciona o domínio MQTT Tuya de cada câmera para o proxy local no HA,
+        permitindo detecção de movimento via Frigate sem depender da nuvem.
+        <strong>Independente</strong> do bloqueio SmartLife acima — as duas features podem
+        coexistir (o rewrite tem precedência sobre as regras de bloqueio no AdGuard).
+      </p>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <button class="btn btn-secondary btn-sm" onclick="syncDnsRewrites()" id="btn-dns-sync"
+          title="Lê as regras DNS diretamente do AdGuard (~20s)">🔄 Sincronizar com AdGuard</button>
+        <span id="dns-sync-hint" style="font-size:0.78rem;color:var(--text-dim)">
+          Use para atualizar após mudanças manuais no AdGuard (~20s)
+        </span>
+      </div>
+
+      <div id="dns-rewrite-list">
+        <p style="font-size:0.83rem;color:var(--text-dim)"><span class="spin">⏳</span> Carregando…</p>
+      </div>
+
+      <div class="progress-ticker hidden" id="dns-rewrite-ticker" style="margin-top:14px">
+        <span class="spin">⚙</span>
+        <span id="dns-rewrite-ticker-label">Aguarde…</span>
+      </div>
+
+      <p style="margin-top:12px;font-size:0.78rem;color:var(--text-dim)">
+        ⏱ Ativar/Desativar leva ~40s (modifica o AdGuard via backup e reinicia brevemente).
+      </p>
+    </div>
+
   </div><!-- /tab-privacy -->
 
 </div><!-- /container -->
@@ -456,7 +488,7 @@ function switchTab(tab) {
     document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === tab);
   });
   if (tab === 'remove')  loadInstalledCameras();
-  if (tab === 'privacy') loadSmartLifeStatus();
+  if (tab === 'privacy') { loadSmartLifeStatus(); loadDnsRewrites(); }
 }
 
 // ── Dependency check ─────────────────────────────────────────────────────────
@@ -573,17 +605,10 @@ function renderCameras() {
             value="${esc(c.ip)}" placeholder="192.168.x.x"
             style="font-family:monospace;width:130px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem${c.ip?'':';border-color:var(--err)'}"></td>
       <td><span class="badge ${c.online?'badge-ok':'badge-off'}">${c.online?'Online':'Offline'}</span></td>
-      <td>
-        <select class="cam-detect" data-idx="${i}" onchange="onDetectionChange(this, ${i})"
-          style="padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem">
-          <option value="frigate" ${!c.proxy_enabled ? 'selected' : ''}>Frigate (ML)</option>
-          <option value="proxy" ${c.proxy_enabled ? 'selected' : ''}>Câmera → Frigate</option>
-        </select>
-      </td>
     </tr>`).join('');
   wrap.innerHTML = `
     <table class="cam-table">
-      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP LAN</th><th>Status</th><th>Detecção</th></tr></thead>
+      <thead><tr><th></th><th>Nome</th><th>Slug</th><th>IP LAN</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${hasEmptyIp ? '<p style="color:var(--warn,#e67e22);font-size:.82rem;margin-top:8px">⚠ IP não detectado automaticamente — preencha o IP LAN de cada câmera antes de provisionar.</p>' : ''}`;
@@ -600,9 +625,8 @@ function getSelected() {
               });
 }
 
-// ── Proxy warning modal ──────────────────────────────────────────────────────
-let _adguardOk     = null;  // cached per session
-let _proxyWarnSlug = null;
+// ── Proxy warning modal (câmeras instaladas com DNS rewrite inativo) ─────────
+let _proxyWarnSlug   = null;
 let _proxyWarnDomain = null;
 
 function closeProxyWarning() {
@@ -632,22 +656,6 @@ function openProxyWarningModal(slug, domain) {
     actions.innerHTML = `
       <button class="btn btn-primary" id="btn-activate-dns" onclick="activateProxyDns()">🔌 Ativar DNS rewrite</button>
       <button class="btn btn-secondary" onclick="closeProxyWarning()">Fechar</button>`;
-  } else {
-    // Selection during provisioning — AdGuard not reachable
-    title.textContent = '⚠️ AdGuard não acessível';
-    body.innerHTML = `
-      <p>O modo <strong>câmera → Frigate</strong> requer o <strong>AdGuard Home</strong>
-      para redirecionar o tráfego MQTT da câmera para o proxy local.</p>
-      <p>O AdGuard não está acessível no momento. Sem ele:</p>
-      <ul>
-        <li>A câmera conecta diretamente ao Tuya Cloud normalmente</li>
-        <li>O Frigate <strong>não receberá eventos de movimento</strong></li>
-        <li>Nenhum clip será gravado para esta câmera</li>
-      </ul>
-      <p style="color:var(--text-dim)">Você pode provisionar assim mesmo e ativar o AdGuard depois.</p>`;
-    actions.innerHTML = `
-      <button class="btn btn-secondary" onclick="closeProxyWarning()">Entendi, continuar assim mesmo</button>
-      <button class="btn btn-primary" onclick="switchTab('privacy'); closeProxyWarning()">🛡️ Ir para Privacidade</button>`;
   }
 
   document.getElementById('proxy-warning-overlay').classList.add('open');
@@ -673,22 +681,6 @@ async function activateProxyDns() {
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = '❌ Erro de rede'; }
   }
-}
-
-async function onDetectionChange(sel, idx) {
-  _cameras[idx].proxy_enabled = (sel.value === 'proxy');
-  if (sel.value !== 'proxy') return;
-  // Lazy-check AdGuard once per session
-  if (_adguardOk === null) {
-    try {
-      const r = await fetch(`${API}/adguard/check`);
-      const d = await r.json();
-      _adguardOk = !!d.ok;
-    } catch (_) {
-      _adguardOk = false;
-    }
-  }
-  if (!_adguardOk) openProxyWarningModal(null, null);
 }
 
 // ── Provision ────────────────────────────────────────────────────────────────
@@ -1113,11 +1105,96 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── DNS Rewrite management ────────────────────────────────────────────────────
+async function loadDnsRewrites() {
+  const listEl = document.getElementById('dns-rewrite-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p style="font-size:0.83rem;color:var(--text-dim)"><span class="spin">⏳</span> Carregando…</p>';
+  try {
+    const resp = await fetch('/api/ekaza_wizard/proxy/status');
+    const data = await resp.json();
+    const proxyCams = (data.cameras || []).filter(c => c.enabled);
+    const activeSet = new Set((data.dns_rewrites || []).map(r => r.domain));
+
+    if (proxyCams.length === 0) {
+      listEl.innerHTML = '<p style="font-size:0.83rem;color:var(--text-dim)">Nenhuma câmera em modo Câmera → Frigate configurada.</p>';
+      return;
+    }
+
+    listEl.innerHTML = proxyCams.map(cam => {
+      const active    = !!(cam.domain && activeSet.has(cam.domain));
+      const domainStr = cam.domain
+        ? `<code style="background:var(--card-bg,#0f3460);padding:1px 6px;border-radius:3px;font-size:0.78rem">${esc(cam.domain)}</code>`
+        : '<span style="color:var(--text-dim)">domínio desconhecido</span>';
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px;background:rgba(255,255,255,.04);border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
+        <span style="font-size:1.3rem;flex-shrink:0">${active ? '✅' : '⚠️'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:0.88rem">${esc(cam.slug)}</div>
+          <div style="font-size:0.78rem;color:var(--text-dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis">
+            ${domainStr} → HA IP${active ? '' : ' <em>(inativo)</em>'}
+          </div>
+        </div>
+        <button class="btn btn-sm ${active ? 'btn-danger' : 'btn-primary'}"
+          onclick="toggleCameraDns('${esc(cam.slug)}', ${!active})"
+          title="${active ? 'Remove apenas a regra DNS do AdGuard (não desativa o proxy)' : 'Adiciona regra DNS no AdGuard para redirecionar MQTT ao proxy local'}">
+          ${active ? '🗑️ Remover rewrite' : '🔀 Ativar rewrite'}
+        </button>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    listEl.innerHTML = `<p style="font-size:0.83rem;color:var(--error,#e05252)">Erro ao carregar: ${esc(String(err))}</p>`;
+  }
+}
+
+async function syncDnsRewrites() {
+  const btn  = document.getElementById('btn-dns-sync');
+  const hint = document.getElementById('dns-sync-hint');
+  btn.disabled = true;
+  hint.textContent = '⏳ Lendo do AdGuard… (~20s)';
+  try {
+    const resp = await fetch('/api/ekaza_wizard/adguard/rewrites/sync');
+    const data = await resp.json();
+    hint.textContent = data.ok
+      ? `✅ Cache atualizado — ${data.count} rewrite(s) encontrado(s)`
+      : '❌ Falha ao ler do AdGuard';
+    await loadDnsRewrites();
+  } catch (err) {
+    hint.textContent = `❌ Erro: ${err}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function toggleCameraDns(slug, enable) {
+  const ticker = document.getElementById('dns-rewrite-ticker');
+  const label  = document.getElementById('dns-rewrite-ticker-label');
+  ticker.classList.remove('hidden');
+  label.textContent = enable ? 'Ativando DNS rewrite…' : 'Removendo DNS rewrite…';
+  try {
+    const resp = await fetch('/api/ekaza_wizard/adguard/rewrite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, enable }),
+    });
+    const data = await resp.json();
+    if (!data.ok) alert(`Erro: ${data.detail || 'falha desconhecida'}`);
+    await loadDnsRewrites();
+  } catch (err) {
+    alert(`Erro: ${err}`);
+  } finally {
+    ticker.classList.add('hidden');
+  }
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 loadConfig();
 loadDashboards();
 doCheck();
 loadSmartLifeStatus();
+loadDnsRewrites();
+// Navega para aba solicitada via localStorage (e.g., pelo card Lovelace)
+const _ekTab = localStorage.getItem('ekaza_tab');
+if (_ekTab) { localStorage.removeItem('ekaza_tab'); switchTab(_ekTab); }
 </script>
 </body>
 </html>
