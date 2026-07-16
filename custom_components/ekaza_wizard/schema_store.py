@@ -144,7 +144,9 @@ def is_camera(schema: dict | None, dev: dict) -> bool:
         return bool(dp_codes & _CAMERA_CODES) and dev.get("category") in ("sp", "ipc")
 
     # No schema: fall back to category heuristics
+    name_lower = dev.get("name", "").lower()
+    if any(k in name_lower for k in ("doorbell", "campainha", "porteiro", "intercom")):
+        return False
     if dev.get("category") in ("sp", "ipc"):
         return True
-    name_lower = dev.get("name", "").lower()
     return any(k in name_lower for k in ("ekaza", "camera", "câmera", "cam", "cctv"))

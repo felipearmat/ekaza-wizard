@@ -6,3 +6,5 @@ CONF_RTSP_PASSWORD = "rtsp_password"
 CONF_SEED_DEVICE_ID = "seed_device_id"
 COMPANION_SLUG = "local_ekaza_companion"
 COMPANION_PORT = 8765
+CONF_PROXY_PORT = "proxy_port"
+PROXY_PORT_DEFAULT = 18883

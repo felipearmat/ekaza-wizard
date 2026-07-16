@@ -3,6 +3,7 @@
 All operations use the Supervisor backup API (create → download → modify YAML → upload → restore)
 because AdGuard binds its HTTP API only to localhost, unreachable from the HA container.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,7 @@ import yaml
 _LOGGER = logging.getLogger(__name__)
 
 _RULE_START = "! ekaza-smartlife-start"
-_RULE_END   = "! ekaza-smartlife-end"
+_RULE_END = "! ekaza-smartlife-end"
 
 BLOCK_DOMAINS = [
     "tuyaeu.com",
@@ -62,6 +63,11 @@ def _write_cached_rewrites(rewrites: list[dict]) -> None:
         _LOGGER.warning("Could not write rewrite cache: %s", exc)
 
 
+async def _async_write_cached_rewrites(rewrites: list[dict]) -> None:
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _write_cached_rewrites, rewrites)
+
+
 async def _get_adguard_slug() -> str:
     """Return the installed AdGuard add-on slug, auto-detecting via Supervisor API."""
     global _adguard_slug
@@ -96,7 +102,11 @@ async def get_rules_status() -> dict:
     """Return {"active": bool, "domains": int, "source": "cache"|"unknown"}."""
     cached = _read_cached_status()
     if cached is not None:
-        return {"active": cached == "active", "domains": len(BLOCK_DOMAINS), "source": "cache"}
+        return {
+            "active": cached == "active",
+            "domains": len(BLOCK_DOMAINS),
+            "source": "cache",
+        }
     return {"active": False, "domains": len(BLOCK_DOMAINS), "source": "unknown"}
 
 
@@ -109,10 +119,14 @@ def _sup_headers() -> dict:
 # Backup helpers (pure Python, no subprocess)
 # ---------------------------------------------------------------------------
 
+
 def _extract_yaml_from_backup(backup_bytes: bytes, addon_slug: str) -> bytes:
     """Extract AdGuardHome.yaml content from a supervisor partial backup."""
     outer = tarfile.open(fileobj=io.BytesIO(backup_bytes))
-    inner_fobj = outer.extractfile(f"{addon_slug}.tar.gz")
+    try:
+        inner_fobj = outer.extractfile(f"{addon_slug}.tar.gz")
+    except KeyError:
+        inner_fobj = None
     if inner_fobj is None:
         raise ValueError(f"addon tar '{addon_slug}.tar.gz' not found in backup")
     inner = tarfile.open(fileobj=io.BytesIO(inner_fobj.read()), mode="r:gz")
@@ -166,10 +180,14 @@ def _modify_adguard_yaml(backup_bytes: bytes, modifier, addon_slug: str) -> byte
     return new_outer_buf.getvalue()
 
 
-def _modify_yaml_in_backup(backup_bytes: bytes, new_rules: list[str], addon_slug: str) -> bytes:
+def _modify_yaml_in_backup(
+    backup_bytes: bytes, new_rules: list[str], addon_slug: str
+) -> bytes:
     """Return modified backup bytes with updated user_rules in AdGuardHome.yaml."""
+
     def _patch(cfg: dict) -> None:
         cfg["user_rules"] = new_rules
+
     return _modify_adguard_yaml(backup_bytes, _patch, addon_slug)
 
 
@@ -177,13 +195,16 @@ def _modify_yaml_in_backup(backup_bytes: bytes, new_rules: list[str], addon_slug
 # Supervisor API helpers
 # ---------------------------------------------------------------------------
 
+
 async def _sup_get(path: str) -> dict | None:
     hdrs = _sup_headers()
     if not hdrs:
         return None
     try:
         async with aiohttp.ClientSession() as s:
-            r = await s.get(f"{_SUP}{path}", headers=hdrs, timeout=aiohttp.ClientTimeout(total=10))
+            r = await s.get(
+                f"{_SUP}{path}", headers=hdrs, timeout=aiohttp.ClientTimeout(total=10)
+            )
             if r.status == 200:
                 return await r.json()
             _LOGGER.debug("Supervisor GET %s → %s", path, r.status)
@@ -199,7 +220,9 @@ async def _sup_post(path: str, json_body: dict, timeout: int = 60) -> dict | Non
     try:
         async with aiohttp.ClientSession() as s:
             r = await s.post(
-                f"{_SUP}{path}", headers=hdrs, json=json_body,
+                f"{_SUP}{path}",
+                headers=hdrs,
+                json=json_body,
                 timeout=aiohttp.ClientTimeout(total=timeout),
             )
             if r.status in (200, 201):
@@ -217,7 +240,9 @@ async def _sup_delete(path: str) -> None:
         return
     try:
         async with aiohttp.ClientSession() as s:
-            await s.delete(f"{_SUP}{path}", headers=hdrs, timeout=aiohttp.ClientTimeout(total=10))
+            await s.delete(
+                f"{_SUP}{path}", headers=hdrs, timeout=aiohttp.ClientTimeout(total=10)
+            )
     except Exception:
         pass
 
@@ -270,17 +295,25 @@ async def _backup_create(addon_slug: str) -> tuple[str | None, bytes]:
         return slug, b""
 
 
-async def _backup_upload_and_restore(backup_bytes: bytes, addon_slug: str) -> tuple[bool, str]:
+async def _backup_upload_and_restore(
+    backup_bytes: bytes, addon_slug: str
+) -> tuple[bool, str]:
     """Upload modified backup and restore AdGuard from it."""
     hdrs = _sup_headers()
     form = aiohttp.FormData()
-    form.add_field("file", backup_bytes, content_type="application/octet-stream",
-                   filename="backup.tar")
+    form.add_field(
+        "file",
+        backup_bytes,
+        content_type="application/octet-stream",
+        filename="backup.tar",
+    )
     try:
         async with aiohttp.ClientSession() as s:
             r = await s.post(
-                f"{_SUP}/backups/new/upload", headers=hdrs,
-                data=form, timeout=aiohttp.ClientTimeout(total=120),
+                f"{_SUP}/backups/new/upload",
+                headers=hdrs,
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=120),
             )
             up_resp = await r.json()
     except Exception as exc:
@@ -339,7 +372,10 @@ async def add_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
     try:
         yaml_bytes = _extract_yaml_from_backup(backup_bytes, addon_slug)
         config = yaml.safe_load(yaml_bytes)
-        rewrites: list[dict] = list(config.get("rewrites") or [])
+        # AdGuard v6: rewrites live under filtering.rewrites, not top-level
+        rewrites: list[dict] = list(
+            (config.get("filtering") or {}).get("rewrites") or []
+        )
     except Exception as exc:
         if slug:
             await _sup_delete(f"/backups/{slug}")
@@ -348,13 +384,17 @@ async def add_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
     if any(r.get("domain") == domain and r.get("answer") == answer for r in rewrites):
         if slug:
             await _sup_delete(f"/backups/{slug}")
-        _write_cached_rewrites(rewrites)
+        await _async_write_cached_rewrites(
+            [{"domain": r["domain"], "answer": r["answer"]} for r in rewrites]
+        )
         return True, f"DNS rewrite já existe: {domain} → {answer}"
 
-    rewrites.append({"domain": domain, "answer": answer})
+    rewrites.append({"domain": domain, "answer": answer, "enabled": True})
 
     def _patch(cfg: dict) -> None:
-        cfg["rewrites"] = rewrites
+        if "filtering" not in cfg:
+            cfg["filtering"] = {}
+        cfg["filtering"]["rewrites"] = rewrites
 
     try:
         modified = _modify_adguard_yaml(backup_bytes, _patch, addon_slug)
@@ -368,7 +408,9 @@ async def add_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
 
     ok, msg = await _backup_upload_and_restore(modified, addon_slug)
     if ok:
-        _write_cached_rewrites(rewrites)
+        await _async_write_cached_rewrites(
+            [{"domain": r["domain"], "answer": r["answer"]} for r in rewrites]
+        )
         _LOGGER.warning("DNS rewrite adicionado: %s → %s", domain, answer)
         return True, f"DNS rewrite adicionado: {domain} → {answer}"
     return False, f"Falha ao restaurar backup AdGuard: {msg}"
@@ -389,25 +431,33 @@ async def remove_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
     try:
         yaml_bytes = _extract_yaml_from_backup(backup_bytes, addon_slug)
         config = yaml.safe_load(yaml_bytes)
-        rewrites: list[dict] = list(config.get("rewrites") or [])
+        # AdGuard v6: rewrites live under filtering.rewrites, not top-level
+        rewrites: list[dict] = list(
+            (config.get("filtering") or {}).get("rewrites") or []
+        )
     except Exception as exc:
         if slug:
             await _sup_delete(f"/backups/{slug}")
         return False, f"Falha ao ler config do AdGuard: {exc}"
 
     new_rewrites = [
-        r for r in rewrites
+        r
+        for r in rewrites
         if not (r.get("domain") == domain and r.get("answer") == answer)
     ]
 
     if len(new_rewrites) == len(rewrites):
         if slug:
             await _sup_delete(f"/backups/{slug}")
-        _write_cached_rewrites(rewrites)
+        await _async_write_cached_rewrites(
+            [{"domain": r["domain"], "answer": r["answer"]} for r in rewrites]
+        )
         return True, f"DNS rewrite não encontrado (ok): {domain}"
 
     def _patch(cfg: dict) -> None:
-        cfg["rewrites"] = new_rewrites
+        if "filtering" not in cfg:
+            cfg["filtering"] = {}
+        cfg["filtering"]["rewrites"] = new_rewrites
 
     try:
         modified = _modify_adguard_yaml(backup_bytes, _patch, addon_slug)
@@ -421,7 +471,9 @@ async def remove_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
 
     ok, msg = await _backup_upload_and_restore(modified, addon_slug)
     if ok:
-        _write_cached_rewrites(new_rewrites)
+        await _async_write_cached_rewrites(
+            [{"domain": r["domain"], "answer": r["answer"]} for r in new_rewrites]
+        )
         _LOGGER.warning("DNS rewrite removido: %s", domain)
         return True, f"DNS rewrite removido: {domain}"
     return False, f"Falha ao restaurar backup AdGuard: {msg}"
@@ -429,7 +481,8 @@ async def remove_dns_rewrite(domain: str, answer: str) -> tuple[bool, str]:
 
 async def list_dns_rewrites() -> list[dict]:
     """Return cached AdGuard DNS rewrite rules (set by add/remove or sync_dns_rewrites)."""
-    return _read_cached_rewrites()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _read_cached_rewrites)
 
 
 async def sync_dns_rewrites() -> tuple[bool, list[dict]]:
@@ -451,7 +504,13 @@ async def sync_dns_rewrites() -> tuple[bool, list[dict]]:
     try:
         yaml_bytes = _extract_yaml_from_backup(backup_bytes, addon_slug)
         config = yaml.safe_load(yaml_bytes)
-        rewrites: list[dict] = list(config.get("rewrites") or [])
+        # AdGuard v6: rewrites live under filtering.rewrites, not top-level
+        all_rewrites: list[dict] = list(
+            (config.get("filtering") or {}).get("rewrites") or []
+        )
+        rewrites = [
+            {"domain": r["domain"], "answer": r["answer"]} for r in all_rewrites
+        ]
     except Exception as exc:
         _LOGGER.warning("sync_dns_rewrites: failed to read YAML: %s", exc)
         if slug:
@@ -461,7 +520,7 @@ async def sync_dns_rewrites() -> tuple[bool, list[dict]]:
         if slug:
             await _sup_delete(f"/backups/{slug}")
 
-    _write_cached_rewrites(rewrites)
+    await _async_write_cached_rewrites(rewrites)
     return True, rewrites
 
 
@@ -489,6 +548,7 @@ async def discover_camera_mqtt_domain(camera_ip: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def check_accessible(hass=None) -> tuple[bool, str]:
     """Return (accessible, message)."""
@@ -558,7 +618,10 @@ async def add_block_rules(hass=None) -> tuple[bool, str]:
     ok, msg = await _backup_upload_and_restore(modified_backup, addon_slug)
     if ok:
         _write_cached_status(True)
-        return True, f"{len(BLOCK_DOMAINS)} domínios SmartLife/Tuya bloqueados no AdGuard"
+        return (
+            True,
+            f"{len(BLOCK_DOMAINS)} domínios SmartLife/Tuya bloqueados no AdGuard",
+        )
     return False, f"Falha ao restaurar backup AdGuard: {msg}"
 
 

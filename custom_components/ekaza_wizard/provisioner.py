@@ -92,7 +92,15 @@ async def run(
     yield _sse("step", {"step": "frigate", "ok": ok, "detail": msg})
 
     # Step 2: LocalTuya config entry + PTZ scripts + motion bridge boolean per camera
+    ha_ip_for_domain = (hass.config.api.local_ip
+                        if hass.config.api and hass.config.api.local_ip
+                        else "127.0.0.1")
     for cam in cameras:
+        # Discover MQTT domain for every camera so it shows in the DNS rewrite section
+        if not cam.tuya_mqtt_domain:
+            domain = await discover_camera_mqtt_domain(cam.ip)
+            cam.tuya_mqtt_domain = domain or "m.tuyaus.com"
+
         ok, msg = await configure_localtuya(hass, cam)
         yield _sse("step", {"camera": cam.slug, "step": "localtuya", "ok": ok, "detail": msg})
 
