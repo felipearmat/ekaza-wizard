@@ -1,4 +1,5 @@
 """Provisioning pipeline: ONVIF → Frigate → LocalTuya → Scripts → Dashboard → Bridge."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,13 +13,17 @@ from homeassistant.core import HomeAssistant
 
 from . import frigate as frigate_mod
 from . import motion_bridge
-from . import tuya_proxy
-from .adguard import add_dns_rewrite, discover_camera_mqtt_domain
+from .adguard import discover_camera_mqtt_domain
 from .dashboard import update_dashboard
-from .ha_helpers import assign_entity_to_area, create_input_boolean, ensure_area, hide_entity, save_cameras
+from .ha_helpers import (
+    assign_entity_to_area,
+    create_input_boolean,
+    ensure_area,
+    hide_entity,
+    save_cameras,
+)
 from .localtuya_flow import configure as configure_localtuya
 from .models import CameraInfo, TuyaCredentials
-from .motion_bridge import fire_event_for_slug
 from .scripts_gen import write_scripts
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +36,7 @@ def _sse(event: str, data: dict) -> str:
 def _probe_rtsp_port(ip: str) -> int:
     """Return the first open RTSP port — 8554 or 554. Default 554."""
     import socket
+
     for port in (8554, 554):
         try:
             with socket.create_connection((ip, port), timeout=3):
@@ -74,45 +80,59 @@ async def run(
     cameras: list[CameraInfo],
     dashboard_path: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    proxy_cameras = [c for c in cameras if c.proxy_enabled]
     # Total steps = cameras * 4 (onvif + localtuya + scripts + motion_bridge_boolean)
     #             + 5 (frigate + reload_scripts + reload_frigate_integration + dashboard + bridge)
-    #             + 2 per proxy camera (dns_rewrite + proxy_start)
-    extra = len(proxy_cameras) + (1 if proxy_cameras else 0)
-    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 5 + extra})
+    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 5})
 
     # Step 0: Probe RTSP port + enable ONVIF + set password per camera
     for cam in cameras:
         cam.rtsp_port = await hass.async_add_executor_job(_probe_rtsp_port, cam.ip)
         ok, msg = await hass.async_add_executor_job(_set_onvif, cam)
-        yield _sse("step", {"camera": cam.slug, "step": "onvif", "ok": ok, "detail": f"{msg} (porta {cam.rtsp_port})"})
+        yield _sse(
+            "step",
+            {
+                "camera": cam.slug,
+                "step": "onvif",
+                "ok": ok,
+                "detail": f"{msg} (porta {cam.rtsp_port})",
+            },
+        )
 
     # Step 1: Update Frigate config via API — saves and triggers Frigate restart automatically
     ok, msg = await frigate_mod.apply(hass, cameras)
     yield _sse("step", {"step": "frigate", "ok": ok, "detail": msg})
 
     # Step 2: LocalTuya config entry + PTZ scripts + motion bridge boolean per camera
-    ha_ip_for_domain = (hass.config.api.local_ip
-                        if hass.config.api and hass.config.api.local_ip
-                        else "127.0.0.1")
     for cam in cameras:
-        # Discover MQTT domain for every camera so it shows in the DNS rewrite section
+        # Discover MQTT domain so it is available to Tuya Proxy Companion
         if not cam.tuya_mqtt_domain:
             domain = await discover_camera_mqtt_domain(cam.ip)
             cam.tuya_mqtt_domain = domain or "m.tuyaus.com"
 
         ok, msg = await configure_localtuya(hass, cam)
-        yield _sse("step", {"camera": cam.slug, "step": "localtuya", "ok": ok, "detail": msg})
+        yield _sse(
+            "step", {"camera": cam.slug, "step": "localtuya", "ok": ok, "detail": msg}
+        )
 
         ok2, msg2 = await hass.async_add_executor_job(write_scripts, cam)
-        yield _sse("step", {"camera": cam.slug, "step": "scripts", "ok": ok2, "detail": msg2})
+        yield _sse(
+            "step", {"camera": cam.slug, "step": "scripts", "ok": ok2, "detail": msg2}
+        )
 
         ok3, msg3 = await create_input_boolean(
             hass,
             f"{cam.slug}_motion_bridge",
             f"{cam.name} Motion Bridge",
         )
-        yield _sse("step", {"camera": cam.slug, "step": "motion_bridge_boolean", "ok": ok3, "detail": msg3})
+        yield _sse(
+            "step",
+            {
+                "camera": cam.slug,
+                "step": "motion_bridge_boolean",
+                "ok": ok3,
+                "detail": msg3,
+            },
+        )
 
         cam_area_id = await ensure_area(hass, cam.name)
         bool_entity = f"input_boolean.{cam.slug}_motion_bridge"
@@ -123,19 +143,26 @@ async def run(
     # Step 3: Reload scripts via HA service
     try:
         await hass.services.async_call("script", "reload", blocking=True)
-        yield _sse("step", {"step": "reload_scripts", "ok": True, "detail": "Scripts recarregados"})
+        yield _sse(
+            "step",
+            {"step": "reload_scripts", "ok": True, "detail": "Scripts recarregados"},
+        )
     except Exception as exc:
         yield _sse("step", {"step": "reload_scripts", "ok": False, "detail": str(exc)})
 
     # Step 4: Wait for Frigate to finish restarting, then reload HA integration
     await asyncio.sleep(15)
     reloaded = await _reload_frigate_integration(hass)
-    yield _sse("step", {
-        "step": "reload_frigate_integration",
-        "ok": reloaded,
-        "detail": "Integração Frigate recarregada — entidades de câmera criadas" if reloaded
-                  else "Recarregue a integração Frigate manualmente (Settings → Integrations → Frigate → Reload)",
-    })
+    yield _sse(
+        "step",
+        {
+            "step": "reload_frigate_integration",
+            "ok": reloaded,
+            "detail": "Integração Frigate recarregada — entidades de câmera criadas"
+            if reloaded
+            else "Recarregue a integração Frigate manualmente (Settings → Integrations → Frigate → Reload)",
+        },
+    )
 
     # Assign Frigate camera entities to each camera's own area
     for cam in cameras:
@@ -153,39 +180,12 @@ async def run(
         await save_cameras(hass, cameras)
         _LOGGER.warning("Cameras saved to storage: %s", [c.slug for c in cameras])
     except Exception as exc:
-        _LOGGER.warning("save_cameras failed (bridge running but won't persist): %s", exc)
-    yield _sse("step", {"step": "motion_bridge", "ok": True, "detail": "Bridge de movimento ativo"})
-
-    # Step 7: MITM proxy setup (camera → frigate mode only)
-    if proxy_cameras:
-        ha_ip = (hass.config.api.local_ip
-                 if hass.config.api and hass.config.api.local_ip
-                 else "127.0.0.1")
-
-        for cam in proxy_cameras:
-            # Auto-discover MQTT domain if not already set
-            if not cam.tuya_mqtt_domain:
-                domain = await discover_camera_mqtt_domain(cam.ip)
-                cam.tuya_mqtt_domain = domain or "m.tuyaus.com"
-
-            ok, msg = await add_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
-            yield _sse("step", {
-                "camera": cam.slug,
-                "step": "proxy_dns",
-                "ok": ok,
-                "detail": f"DNS rewrite {cam.tuya_mqtt_domain} → {ha_ip}: {msg}",
-            })
-
-        await tuya_proxy.start(hass, proxy_cameras, fire_event_for_slug)
-        # Persist updated tuya_mqtt_domain into storage
-        try:
-            await save_cameras(hass, cameras)
-        except Exception:
-            pass
-        yield _sse("step", {
-            "step": "proxy_start",
-            "ok": True,
-            "detail": f"Proxy MITM ativo na porta 8883 ({len(proxy_cameras)} câmera(s))",
-        })
+        _LOGGER.warning(
+            "save_cameras failed (bridge running but won't persist): %s", exc
+        )
+    yield _sse(
+        "step",
+        {"step": "motion_bridge", "ok": True, "detail": "Bridge de movimento ativo"},
+    )
 
     yield _sse("done", {"cameras": [c.slug for c in cameras]})

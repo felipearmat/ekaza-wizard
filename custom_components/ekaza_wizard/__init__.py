@@ -34,7 +34,46 @@ from .models import ProvisionRequest, TuyaCredentials
 
 _LOGGER = logging.getLogger(__name__)
 _STATIC = Path(__file__).parent / "static"
+_CARD_JS = "ekaza-camera-card.js"
+_CARD_URL = f"/local/{_CARD_JS}"
 PLATFORMS: list[str] = []
+
+
+async def _deploy_card_resource(hass: HomeAssistant) -> None:
+    """Copy bundled card JS to /config/www/ and register it as a Lovelace resource."""
+    import shutil
+
+    src = _STATIC / _CARD_JS
+    if not src.exists():
+        _LOGGER.error(
+            "Card file %s not found in integration package — card will not work. "
+            "Copy %s to /config/www/ manually and add it as a Lovelace resource.",
+            src,
+            _CARD_JS,
+        )
+        return
+
+    www = Path(hass.config.config_dir) / "www"
+    await hass.async_add_executor_job(www.mkdir, 0o755, True, True)
+    dst = www / _CARD_JS
+    await hass.async_add_executor_job(shutil.copy2, str(src), str(dst))
+
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None or not hasattr(lovelace, "resources"):
+        _LOGGER.warning(
+            "Lovelace resources store unavailable — add %s manually", _CARD_URL
+        )
+        return
+
+    try:
+        items = await lovelace.resources.async_load()
+        if not any(r.get("url") == _CARD_URL for r in items):
+            await lovelace.resources.async_create_item(
+                {"res_type": "module", "url": _CARD_URL}
+            )
+            _LOGGER.warning("Lovelace resource registered: %s", _CARD_URL)
+    except Exception as exc:
+        _LOGGER.warning("Could not register Lovelace resource %s: %s", _CARD_URL, exc)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -123,6 +162,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Motion bridge: no saved cameras found on startup")
 
     hass.loop.create_task(_restart_bridge_and_proxy())
+    hass.loop.create_task(_deploy_card_resource(hass))
 
     try:
         async_register_built_in_panel(
