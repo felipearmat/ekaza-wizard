@@ -58,7 +58,13 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
         return
 
     try:
-        items = await lovelace.resources.async_load()
+        # async_load() initialises the store but returns None in HA 2024+;
+        # items are then available via async_items() (@callback, sync).
+        await lovelace.resources.async_load()
+        if hasattr(lovelace.resources, "async_items"):
+            items = lovelace.resources.async_items()
+        else:
+            items = list(getattr(lovelace.resources, "_data", {}).values())
         if any(r.get("url") == _CARD_URL for r in items):
             _LOGGER.warning("Lovelace resource already registered: %s", _CARD_URL)
             return
