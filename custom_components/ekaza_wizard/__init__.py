@@ -13,7 +13,8 @@ from homeassistant.components.frontend import (
 )
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import Event, HomeAssistant
 
 from . import adguard as adguard_mod
 from . import check as check_mod
@@ -39,8 +40,38 @@ _CARD_URL = f"/local/{_CARD_JS}"
 PLATFORMS: list[str] = []
 
 
+async def _register_lovelace_resource(hass: HomeAssistant) -> None:
+    """Register /local/ekaza-camera-card.js as a Lovelace module resource (idempotent)."""
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        _LOGGER.warning(
+            "Lovelace not in hass.data — add %s as a Lovelace resource manually",
+            _CARD_URL,
+        )
+        return
+    if not hasattr(lovelace, "resources"):
+        _LOGGER.warning(
+            "Lovelace object has no 'resources' attribute (type=%s) — add %s manually",
+            type(lovelace).__name__,
+            _CARD_URL,
+        )
+        return
+
+    try:
+        items = await lovelace.resources.async_load()
+        if any(r.get("url") == _CARD_URL for r in items):
+            _LOGGER.warning("Lovelace resource already registered: %s", _CARD_URL)
+            return
+        await lovelace.resources.async_create_item(
+            {"res_type": "module", "url": _CARD_URL}
+        )
+        _LOGGER.warning("Lovelace resource registered: %s", _CARD_URL)
+    except Exception as exc:
+        _LOGGER.warning("Could not register Lovelace resource %s: %s", _CARD_URL, exc)
+
+
 async def _deploy_card_resource(hass: HomeAssistant) -> None:
-    """Copy bundled card JS to /config/www/ and register it as a Lovelace resource."""
+    """Copy bundled card JS to /config/www/ and schedule Lovelace resource registration."""
     import shutil
 
     src = _STATIC / _CARD_JS
@@ -57,23 +88,17 @@ async def _deploy_card_resource(hass: HomeAssistant) -> None:
     await hass.async_add_executor_job(www.mkdir, 0o755, True, True)
     dst = www / _CARD_JS
     await hass.async_add_executor_job(shutil.copy2, str(src), str(dst))
+    _LOGGER.warning("Card deployed: %s", dst)
 
-    lovelace = hass.data.get("lovelace")
-    if lovelace is None or not hasattr(lovelace, "resources"):
-        _LOGGER.warning(
-            "Lovelace resources store unavailable — add %s manually", _CARD_URL
-        )
-        return
+    # Defer Lovelace resource registration until after all integrations are loaded,
+    # since the lovelace resources store may not be ready during setup.
+    async def _on_started(_event: Event) -> None:
+        await _register_lovelace_resource(hass)
 
-    try:
-        items = await lovelace.resources.async_load()
-        if not any(r.get("url") == _CARD_URL for r in items):
-            await lovelace.resources.async_create_item(
-                {"res_type": "module", "url": _CARD_URL}
-            )
-            _LOGGER.warning("Lovelace resource registered: %s", _CARD_URL)
-    except Exception as exc:
-        _LOGGER.warning("Could not register Lovelace resource %s: %s", _CARD_URL, exc)
+    if hass.is_running:
+        await _register_lovelace_resource(hass)
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -161,8 +186,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             _LOGGER.warning("Motion bridge: no saved cameras found on startup")
 
-    hass.loop.create_task(_restart_bridge_and_proxy())
-    hass.loop.create_task(_deploy_card_resource(hass))
+    hass.async_create_task(_restart_bridge_and_proxy())
+    hass.async_create_task(_deploy_card_resource(hass))
 
     try:
         async_register_built_in_panel(
