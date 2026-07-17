@@ -225,7 +225,7 @@ async def _sup_post(path: str, json_body: dict, timeout: int = 60) -> dict | Non
                 json=json_body,
                 timeout=aiohttp.ClientTimeout(total=timeout),
             )
-            if r.status in (200, 201):
+            if r.status in (200, 201, 202):
                 return await r.json()
             text = await r.text()
             _LOGGER.debug("Supervisor POST %s → %s: %s", path, r.status, text[:100])

@@ -1,4 +1,5 @@
-"""Update Lovelace dashboard with security-camera-card entries."""
+"""Update Lovelace dashboard with ekaza-camera-card entries."""
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +10,7 @@ from .models import CameraInfo
 
 _LOGGER = logging.getLogger(__name__)
 _DASHBOARD_PATH = "cameras"
-_CARD_TYPE = "custom:security-camera-card"
+_CARD_TYPE = "custom:ekaza-camera-card"
 
 
 def _card(cam: CameraInfo) -> dict:
@@ -71,7 +72,9 @@ async def list_dashboards(hass: HomeAssistant) -> list[dict]:
     return result
 
 
-async def _find_target_and_config(lovelace, url_path: str | None = None) -> tuple | None:
+async def _find_target_and_config(
+    lovelace, url_path: str | None = None
+) -> tuple | None:
     """Return (dashboard_obj, config_dict) matching url_path, or first loadable if None."""
     from homeassistant.components.lovelace.const import ConfigNotFound
 
@@ -107,7 +110,7 @@ async def _find_target_and_config(lovelace, url_path: str | None = None) -> tupl
     else:
         _LOGGER.warning(
             "No loadable dashboard found; keys=%s",
-            list(dashboards.keys()) if hasattr(dashboards, "keys") else "?"
+            list(dashboards.keys()) if hasattr(dashboards, "keys") else "?",
         )
     return None
 
@@ -177,11 +180,16 @@ async def remove_card(hass: HomeAssistant, slug: str) -> tuple[bool, str]:
                 _LOGGER.warning("Dashboard %s save error: %s", key, exc)
 
     if total_removed:
-        return True, f"{total_removed} card(s) removido(s) de {dashes_modified} dashboard(s)"
+        return (
+            True,
+            f"{total_removed} card(s) removido(s) de {dashes_modified} dashboard(s)",
+        )
     return True, "Nenhum card encontrado para remover"
 
 
-async def update_dashboard(hass: HomeAssistant, cameras: list[CameraInfo], target_path: str | None = None) -> tuple[bool, str]:
+async def update_dashboard(
+    hass: HomeAssistant, cameras: list[CameraInfo], target_path: str | None = None
+) -> tuple[bool, str]:
     try:
         lovelace = hass.data.get("lovelace")
         if lovelace is None:
@@ -189,7 +197,12 @@ async def update_dashboard(hass: HomeAssistant, cameras: list[CameraInfo], targe
 
         result = await _find_target_and_config(lovelace, url_path=target_path)
         if result is None:
-            return False, f"Dashboard '{target_path}' não encontrado" if target_path else "Nenhum dashboard Lovelace gravável encontrado"
+            return (
+                False,
+                f"Dashboard '{target_path}' não encontrado"
+                if target_path
+                else "Nenhum dashboard Lovelace gravável encontrado",
+            )
 
         target, config = result
         views: list = config.get("views", [])
@@ -200,8 +213,14 @@ async def update_dashboard(hass: HomeAssistant, cameras: list[CameraInfo], targe
             config["views"] = views
         target_view = views[0]
 
-        existing = {c.get("entity") for c in target_view.get("cards", []) if c.get("type") == _CARD_TYPE}
-        new_cards = [_card(cam) for cam in cameras if f"camera.{cam.slug}" not in existing]
+        existing = {
+            c.get("entity")
+            for c in target_view.get("cards", [])
+            if c.get("type") == _CARD_TYPE
+        }
+        new_cards = [
+            _card(cam) for cam in cameras if f"camera.{cam.slug}" not in existing
+        ]
         target_view.setdefault("cards", []).extend(new_cards)
 
         config["views"] = views

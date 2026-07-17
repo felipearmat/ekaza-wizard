@@ -85,6 +85,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "ip": c.ip,
                     "proxy_enabled": c.proxy_enabled,
                     "tuya_mqtt_domain": c.tuya_mqtt_domain or "m.tuyaus.com",
+                    "device_id": c.device_id,
+                    "local_key": c.local_key,
                 }
                 for c in cameras
             ]
@@ -529,23 +531,17 @@ class EkazaProxyStatusView(HomeAssistantView):
         self._hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        from .adguard import list_dns_rewrites
         from .ha_helpers import load_cameras
 
         cameras = await load_cameras(self._hass)
         proxy_cams = [
             {
                 "slug": c.slug,
+                "name": c.name,
                 "domain": c.tuya_mqtt_domain or "m.tuyaus.com",
                 "enabled": c.proxy_enabled,
             }
             for c in cameras
-        ]
-        rewrites = await list_dns_rewrites()
-        ekaza_rewrites = [
-            r
-            for r in rewrites
-            if any(c.tuya_mqtt_domain == r.get("domain") for c in cameras)
         ]
         companion_status = await companion_mod.get_status(self._hass)
         return self.json(
@@ -558,7 +554,6 @@ class EkazaProxyStatusView(HomeAssistantView):
                 else tuya_proxy.proxy_port(),
                 "companion_installed": companion_status is not None,
                 "cameras": proxy_cams,
-                "dns_rewrites": ekaza_rewrites,
             }
         )
 
@@ -568,9 +563,8 @@ class EkazaProxyToggleView(HomeAssistantView):
 
     Body: {"slug": "...", "enable": true}
 
-    Enabling:  adds AdGuard DNS rewrite + marks camera proxy_enabled=True in storage.
-    Disabling: removes DNS rewrite + marks proxy_enabled=False.
-    The proxy server itself is always-on; DNS rewrite controls whether it intercepts.
+    Marks camera proxy_enabled in storage and syncs the updated list to the
+    Tuya Proxy Companion (which owns the local Tuya listener and iptables rules).
     """
 
     url = "/api/ekaza_wizard/proxy/toggle"
@@ -591,11 +585,6 @@ class EkazaProxyToggleView(HomeAssistantView):
         if not slug:
             return self.json({"error": "'slug' obrigatório"}, status_code=422)
 
-        from .adguard import (
-            add_dns_rewrite,
-            discover_camera_mqtt_domain,
-            remove_dns_rewrite,
-        )
         from .ha_helpers import load_cameras, save_cameras
 
         cameras = await load_cameras(self._hass)
@@ -605,37 +594,7 @@ class EkazaProxyToggleView(HomeAssistantView):
                 {"error": f"Câmera '{slug}' não encontrada no storage"}, status_code=404
             )
 
-        ha_ip = (
-            self._hass.config.api.local_ip
-            if self._hass.config.api and self._hass.config.api.local_ip
-            else "127.0.0.1"
-        )
-
-        if enable:
-            # Check companion is available before activating DNS rewrite
-            companion_status = await companion_mod.get_status(self._hass)
-            if companion_status is None:
-                return self.json(
-                    {
-                        "error": "companion_missing",
-                        "detail": (
-                            "O add-on Tuya Proxy Companion não está instalado ou não está rodando. "
-                            "Instale-o para usar o modo câmera→Frigate com bloqueio de SmartLife."
-                        ),
-                    },
-                    status_code=424,
-                )
-            if not cam.tuya_mqtt_domain:
-                domain = await discover_camera_mqtt_domain(cam.ip)
-                cam.tuya_mqtt_domain = domain or "m.tuyaus.com"
-            cam.proxy_enabled = True
-            ok, msg = await add_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
-        else:
-            cam.proxy_enabled = False
-            if cam.tuya_mqtt_domain:
-                ok, msg = await remove_dns_rewrite(cam.tuya_mqtt_domain, ha_ip)
-            else:
-                ok, msg = True, "Sem DNS rewrite para remover"
+        cam.proxy_enabled = enable
 
         # Sync updated camera list to companion (owns iptables) or fallback in-process proxy.
         cam_payloads = [
@@ -644,6 +603,8 @@ class EkazaProxyToggleView(HomeAssistantView):
                 "ip": c.ip,
                 "proxy_enabled": c.proxy_enabled,
                 "tuya_mqtt_domain": c.tuya_mqtt_domain or "m.tuyaus.com",
+                "device_id": c.device_id,
+                "local_key": c.local_key,
             }
             for c in cameras
         ]
@@ -659,11 +620,9 @@ class EkazaProxyToggleView(HomeAssistantView):
 
         return self.json(
             {
-                "ok": ok,
+                "ok": True,
                 "slug": slug,
                 "proxy_enabled": cam.proxy_enabled,
-                "tuya_mqtt_domain": cam.tuya_mqtt_domain,
-                "detail": msg,
             }
         )
 

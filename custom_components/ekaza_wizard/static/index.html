@@ -145,27 +145,6 @@
   #warning-modal h3 { color: var(--warn); margin-bottom: 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
   #warning-modal p { font-size: 0.85rem; color: var(--text); line-height: 1.7; margin-bottom: 20px; }
 
-  /* ── Proxy warning modal ── */
-  #proxy-warning-overlay {
-    display: none; position: fixed; inset: 0; z-index: 500;
-    background: rgba(0,0,0,.65); align-items: center; justify-content: center; padding: 16px;
-  }
-  #proxy-warning-overlay.open { display: flex; }
-  #proxy-warning-modal {
-    background: var(--surface); border: 2px solid var(--warn);
-    border-radius: var(--radius); max-width: 490px; width: 100%; padding: 24px;
-    animation: fadeIn .2s ease;
-  }
-  #proxy-warning-modal h3 { color: var(--warn); margin-bottom: 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
-  #proxy-warning-modal p { font-size: 0.85rem; color: var(--text); line-height: 1.7; margin-bottom: 8px; }
-  #proxy-warning-modal ul { font-size: 0.83rem; color: var(--text-dim); line-height: 1.8; margin: 6px 0 14px 18px; }
-  .btn-warn-inline {
-    padding: 2px 8px; font-size: .75rem; font-weight: 600;
-    background: rgba(245,166,35,.15); color: var(--warn);
-    border: 1px solid rgba(245,166,35,.4); border-radius: 12px; cursor: pointer;
-    transition: background .15s;
-  }
-  .btn-warn-inline:hover { background: rgba(245,166,35,.3); }
 
   /* ── Animations ── */
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -199,17 +178,8 @@
   </div>
 </div>
 
-<!-- ── Proxy warning modal ── -->
-<div id="proxy-warning-overlay">
-  <div id="proxy-warning-modal">
-    <h3 id="proxy-warning-title">⚠️ AdGuard necessário</h3>
-    <div id="proxy-warning-body"></div>
-    <div class="actions" id="proxy-warning-actions" style="margin-top:0"></div>
-  </div>
-</div>
-
 <!-- ── Operation banner ── -->
-<div id="version-badge">eKaza Wizard v0.5.0</div>
+<div id="version-badge">eKaza Wizard v0.6.0</div>
 
 <div id="op-banner">
   <span class="spin">⏳</span>&nbsp;
@@ -223,8 +193,8 @@
   <!-- ── Tab navigation ── -->
   <div class="tabs">
     <button class="tab-btn active"  id="tab-btn-install"  onclick="switchTab('install')">📥 Instalar</button>
-    <button class="tab-btn tab-danger" id="tab-btn-remove" onclick="switchTab('remove')">🗑️ Remover</button>
     <button class="tab-btn"         id="tab-btn-privacy" onclick="switchTab('privacy')">🛡️ Privacidade</button>
+    <button class="tab-btn tab-danger" id="tab-btn-remove" onclick="switchTab('remove')">🗑️ Remover</button>
   </div>
 
   <!-- ══════════════════════════════════════════════════════ -->
@@ -245,9 +215,9 @@
       </div>
     </div>
 
-    <!-- STEP 1: Credentials -->
+    <!-- STEP 1: Wizard settings (credentials + dashboard) -->
     <div class="card" id="section-creds">
-      <h2><span class="step-num">1</span> Credenciais Tuya</h2>
+      <h2><span class="step-num">1</span> Configurações do Wizard</h2>
       <div class="grid2">
         <div>
           <label>Access ID</label>
@@ -271,6 +241,13 @@
           <input id="rtsp-pwd" type="password" placeholder="SenhaForte123!">
         </div>
       </div>
+      <div style="margin-top:16px">
+        <label for="dashboard-select">Dashboard de destino</label>
+        <select id="dashboard-select">
+          <option value="">⏳ Carregando dashboards…</option>
+        </select>
+        <p id="dashboard-hint" style="margin-top:6px; font-size:0.78rem; color:var(--text-dim); line-height:1.4;"></p>
+      </div>
       <div class="actions">
         <button class="btn btn-primary" id="btn-discover" onclick="doDiscover()">
           🔍 Descobrir Câmeras
@@ -278,22 +255,9 @@
       </div>
     </div>
 
-    <!-- STEP 2: Dashboard target -->
-    <div class="card" id="section-dashboard">
-      <h2><span class="step-num">2</span> Dashboard de Destino</h2>
-      <p style="font-size:0.83rem; color:var(--text-dim); margin-bottom:14px; line-height:1.5;">
-        Escolha em qual dashboard o card da câmera será adicionado após o provisionamento.
-      </p>
-      <label for="dashboard-select">Dashboard</label>
-      <select id="dashboard-select">
-        <option value="">⏳ Carregando dashboards…</option>
-      </select>
-      <p id="dashboard-hint" style="margin-top:8px; font-size:0.78rem; color:var(--text-dim); line-height:1.4;"></p>
-    </div>
-
-    <!-- STEP 3: Camera list -->
+    <!-- STEP 2: Camera list -->
     <div class="card locked" id="section-cameras">
-      <h2><span class="step-num">3</span> Câmeras Encontradas</h2>
+      <h2><span class="step-num">2</span> Câmeras Encontradas</h2>
       <div id="cam-list-wrap">
         <p style="color:var(--text-dim);font-size:.85rem">Nenhuma câmera encontrada ainda.</p>
       </div>
@@ -304,11 +268,11 @@
       </div>
     </div>
 
-    <!-- STEP 4: Provisioning log -->
+    <!-- STEP 3: Provisioning log -->
     <div class="card locked" id="section-provision">
       <h2>
         <div id="progress-header">
-          <span class="step-num">4</span> Progresso
+          <span class="step-num">3</span> Progresso
           <span class="progress-pill" id="progress-pill"></span>
         </div>
       </h2>
@@ -359,7 +323,70 @@
   <!-- ══════════════════════════════════════════════════════ -->
   <div id="tab-privacy" class="hidden">
 
+    <!-- 1. Companion status -->
     <div class="card">
+      <h2>🤖 Tuya Proxy Companion</h2>
+
+      <div id="companion-banner" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:6px;border:1px solid var(--border);margin-bottom:16px;background:rgba(160,160,176,.06)">
+        <span id="companion-banner-icon" style="font-size:1.4rem;flex-shrink:0">⏳</span>
+        <div style="flex:1;font-size:0.85rem" id="companion-banner-text">Verificando companion…</div>
+      </div>
+
+      <div id="companion-not-installed" class="hidden">
+        <p style="font-size:0.85rem;color:var(--text-dim);line-height:1.7;margin-bottom:10px;">
+          O <strong>Tuya Proxy Companion</strong> é o add-on responsável por detectar eventos de movimento
+          das câmeras via protocolo Tuya local (LAN), gerenciar regras iptables e enviar eventos ao Frigate
+          — sem dependência de internet ou DNS externo.
+        </p>
+        <p style="font-size:0.85rem;color:var(--text-dim);line-height:1.7;">
+          Instale o add-on no seu repositório local do Home Assistant e reinicie o eKaza Wizard.
+          O repositório está em:
+          <a href="https://github.com/felipearmat/tuya-proxy-companion" target="_blank"
+            style="color:var(--accent2)">github.com/felipearmat/tuya-proxy-companion</a>
+        </p>
+      </div>
+
+      <!-- Proxy port config (companion-related, shown when companion present) -->
+      <div id="companion-proxy-port">
+        <div style="margin-top:4px;margin-bottom:14px">
+          <label>Status do proxy</label>
+          <div id="proxy-port-status" style="font-size:0.85rem;padding:8px 12px;background:var(--card);border-radius:4px;border:1px solid var(--border)">
+            <span class="spin">⏳</span> Verificando…
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
+          <div style="max-width:160px">
+            <label for="proxy-port-input">Porta do proxy MITM</label>
+            <input type="number" id="proxy-port-input" min="1024" max="65535" placeholder="18883">
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="checkProxyPort()" id="btn-port-check">Verificar</button>
+          <button class="btn btn-primary btn-sm" onclick="saveProxyPort()" id="btn-port-save">Salvar e reiniciar</button>
+        </div>
+        <div id="proxy-port-result" style="margin-top:10px;font-size:0.82rem;color:var(--text-dim)"></div>
+      </div>
+    </div>
+
+    <!-- 2. Cameras — proxy_enabled toggle per camera -->
+    <div class="card" style="margin-top:18px" id="companion-cameras-card">
+      <h2>🎥 Câmeras — Modo Câmera → Frigate</h2>
+
+      <p style="font-size:0.83rem;color:var(--text-dim);margin-bottom:14px;line-height:1.6;">
+        Quando ativo, o Companion conecta à câmera via protocolo Tuya local (porta 6668, LAN) para
+        receber eventos de movimento e enviá-los ao Frigate. Este modo é configurado automaticamente
+        pelo card da câmera ao selecionar <em>Câmera → Frigate</em>.
+      </p>
+
+      <div id="proxy-camera-list">
+        <p style="font-size:0.83rem;color:var(--text-dim)"><span class="spin">⏳</span> Carregando…</p>
+      </div>
+
+      <div style="margin-top:12px">
+        <button class="btn btn-secondary btn-sm" onclick="loadProxyCameras()">🔄 Atualizar</button>
+      </div>
+    </div>
+
+    <!-- 3. SmartLife / Tuya block (privacy) -->
+    <div class="card" style="margin-top:18px">
       <h2>🛡️ Bloqueio SmartLife / Tuya</h2>
 
       <!-- Status indicator -->
@@ -372,7 +399,6 @@
         <button class="btn btn-secondary btn-sm" onclick="loadSmartLifeStatus()" title="Atualizar status">🔄</button>
       </div>
 
-      <!-- Description + warning -->
       <p style="font-size:0.83rem;color:var(--text-dim);margin-bottom:12px;line-height:1.6;">
         Bloqueia o envio de imagens e eventos das câmeras para servidores Tuya/SmartLife via AdGuard Home,
         limitando a comunicação à rede local.
@@ -382,7 +408,6 @@
         dispositivos via SmartLife na mesma rede. Remova temporariamente para parear novos dispositivos.
       </div>
 
-      <!-- Domain list -->
       <details style="margin-bottom:18px">
         <summary style="cursor:pointer;font-size:0.82rem;color:var(--text-dim);user-select:none;padding:4px 0">
           Domínios bloqueados (9) ▾
@@ -400,7 +425,6 @@
         </div>
       </details>
 
-      <!-- Action buttons -->
       <div class="actions">
         <button class="btn btn-primary" id="btn-block-smartlife" onclick="doSmartLifeAction('block')">🔒 Ativar bloqueio</button>
         <button class="btn btn-danger"  id="btn-unblock-smartlife" onclick="doSmartLifeAction('unblock')">🔓 Remover bloqueio</button>
@@ -409,80 +433,12 @@
         ⏱ Cada operação leva ~40s e reinicia o AdGuard brevemente.
       </p>
 
-      <!-- Progress ticker -->
       <div class="progress-ticker hidden" id="privacy-ticker" style="margin-top:16px">
         <span class="spin">⚙</span>
         <span id="privacy-ticker-label">Iniciando…</span>
       </div>
 
-      <!-- Operation log -->
       <div id="privacy-log" class="hidden" style="background:#0a0a1a;border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:monospace;font-size:0.82rem;max-height:200px;overflow-y:auto;margin-top:12px;"></div>
-    </div>
-
-    <!-- DNS Rewrite — Proxy MQTT (feature independente do bloqueio acima) -->
-    <div class="card" style="margin-top:18px">
-      <h2>🔀 DNS Rewrite — Proxy MQTT</h2>
-
-      <!-- Companion add-on status banner -->
-      <div id="companion-banner" style="display:none;align-items:center;gap:10px;padding:10px 14px;border-radius:6px;border:1px solid;margin-bottom:14px">
-        <span id="companion-banner-icon" style="font-size:1.3rem;flex-shrink:0"></span>
-        <div style="flex:1;font-size:0.83rem" id="companion-banner-text"></div>
-      </div>
-
-      <p style="font-size:0.83rem;color:var(--text-dim);margin-bottom:12px;line-height:1.6;">
-        Redireciona o domínio MQTT Tuya da câmera para o proxy local no HA (sempre ativo em :<span id="proxy-port-label">18883</span>),
-        interceptando eventos de movimento e enviando ao Frigate — <strong>sem repassar para a nuvem</strong>,
-        o que bloqueia as notificações do SmartLife. Use "Ativar" para adicionar a regra DNS no AdGuard
-        e "Remover" para reverter ao comportamento padrão (câmera → Tuya cloud).
-      </p>
-
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-        <button class="btn btn-secondary btn-sm" onclick="syncDnsRewrites()" id="btn-dns-sync"
-          title="Lê as regras DNS diretamente do AdGuard (~20s)">🔄 Sincronizar com AdGuard</button>
-        <span id="dns-sync-hint" style="font-size:0.78rem;color:var(--text-dim)">
-          Use para atualizar após mudanças manuais no AdGuard (~20s)
-        </span>
-      </div>
-
-      <div id="dns-rewrite-list">
-        <p style="font-size:0.83rem;color:var(--text-dim)"><span class="spin">⏳</span> Carregando…</p>
-      </div>
-
-      <div class="progress-ticker hidden" id="dns-rewrite-ticker" style="margin-top:14px">
-        <span class="spin">⚙</span>
-        <span id="dns-rewrite-ticker-label">Aguarde…</span>
-      </div>
-
-      <p style="margin-top:12px;font-size:0.78rem;color:var(--text-dim)">
-        ⏱ Ativar/Desativar leva ~40s (modifica o AdGuard via backup e reinicia brevemente).
-      </p>
-    </div>
-
-    <!-- Proxy Port Config -->
-    <div class="card" style="margin-top:18px">
-      <h2>⚙️ Porta do Proxy MITM</h2>
-      <p style="font-size:0.83rem;color:var(--text-dim);margin-bottom:14px;line-height:1.6;">
-        O proxy MITM escuta em uma porta local e o iptables redireciona o tráfego MQTT das câmeras
-        (porta 8883) para ela. Porta padrão: <code>18883</code> (evita conflito com Mosquitto MQTT/TLS).
-      </p>
-
-      <div style="margin-bottom:14px">
-        <label>Status do proxy</label>
-        <div id="proxy-port-status" style="font-size:0.85rem;padding:8px 12px;background:var(--card);border-radius:4px;border:1px solid var(--border)">
-          <span class="spin">⏳</span> Verificando…
-        </div>
-      </div>
-
-      <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
-        <div style="max-width:160px">
-          <label for="proxy-port-input">Nova porta</label>
-          <input type="number" id="proxy-port-input" min="1024" max="65535" placeholder="18883">
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="checkProxyPort()" id="btn-port-check">Verificar</button>
-        <button class="btn btn-primary btn-sm" onclick="saveProxyPort()" id="btn-port-save">Salvar e reiniciar</button>
-      </div>
-
-      <div id="proxy-port-result" style="margin-top:10px;font-size:0.82rem;color:var(--text-dim)"></div>
     </div>
 
   </div><!-- /tab-privacy -->
@@ -522,7 +478,7 @@ function switchTab(tab) {
     document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === tab);
   });
   if (tab === 'remove')  loadInstalledCameras();
-  if (tab === 'privacy') { loadSmartLifeStatus(); loadDnsRewrites(); loadProxyPort(); }
+  if (tab === 'privacy') { loadSmartLifeStatus(); loadProxyCameras(); loadProxyPort(); }
 }
 
 // ── Dependency check ─────────────────────────────────────────────────────────
@@ -659,63 +615,6 @@ function getSelected() {
               });
 }
 
-// ── Proxy warning modal (câmeras instaladas com DNS rewrite inativo) ─────────
-let _proxyWarnSlug   = null;
-let _proxyWarnDomain = null;
-
-function closeProxyWarning() {
-  document.getElementById('proxy-warning-overlay').classList.remove('open');
-}
-
-function openProxyWarningModal(slug, domain) {
-  _proxyWarnSlug   = slug   || null;
-  _proxyWarnDomain = domain || null;
-  const title   = document.getElementById('proxy-warning-title');
-  const body    = document.getElementById('proxy-warning-body');
-  const actions = document.getElementById('proxy-warning-actions');
-
-  if (slug) {
-    // Installed camera — DNS rewrite missing
-    const domainStr = domain ? ` para <code style="background:var(--card);padding:1px 5px;border-radius:3px">${esc(domain)}</code>` : '';
-    title.textContent = '⚠️ DNS rewrite inativo';
-    body.innerHTML = `
-      <p>A câmera <strong>${esc(slug)}</strong> está no modo <strong>câmera → Frigate</strong>,
-      mas o DNS rewrite${domainStr} não está ativo no AdGuard.</p>
-      <p>Sem isso, a câmera conecta diretamente ao Tuya Cloud e <strong>nenhum evento de
-      movimento chega ao Frigate</strong> — nenhum clip é gravado.</p>
-      <ul>
-        <li>Clique em <strong>Ativar DNS rewrite</strong> para corrigir agora</li>
-        <li>Ou reinstale o AdGuard Home se ele não estiver acessível</li>
-      </ul>`;
-    actions.innerHTML = `
-      <button class="btn btn-primary" id="btn-activate-dns" onclick="activateProxyDns()">🔌 Ativar DNS rewrite</button>
-      <button class="btn btn-secondary" onclick="closeProxyWarning()">Fechar</button>`;
-  }
-
-  document.getElementById('proxy-warning-overlay').classList.add('open');
-}
-
-async function activateProxyDns() {
-  if (!_proxyWarnSlug) return;
-  const btn = document.getElementById('btn-activate-dns');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ativando…'; }
-  try {
-    const r = await fetch(`${API}/proxy/toggle`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({slug: _proxyWarnSlug, enable: true}),
-    });
-    const d = await r.json();
-    if (d.ok) {
-      closeProxyWarning();
-      await loadInstalledCameras();
-    } else {
-      if (btn) { btn.disabled = false; btn.textContent = `❌ ${esc(d.detail || 'Erro')}`; }
-    }
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = '❌ Erro de rede'; }
-  }
-}
 
 // ── Provision ────────────────────────────────────────────────────────────────
 const STEP_LABELS = {
@@ -727,7 +626,6 @@ const STEP_LABELS = {
   restart_frigate:'Reiniciando Frigate',
   dashboard:      'Atualizando dashboard',
   motion_bridge:  'Iniciando bridge',
-  proxy_dns:      'Ativando DNS rewrite…',
   proxy_start:    'Iniciando proxy MITM…',
 };
 
@@ -875,18 +773,12 @@ async function loadInstalledCameras() {
     ]);
     _installedCameras = camResp.cameras || [];
 
-    // Merge proxy status into each camera entry
     if (proxyResp) {
       const proxyMap = {};
       for (const pc of (proxyResp.cameras || [])) proxyMap[pc.slug] = pc;
-      const activeRewrites = new Set((proxyResp.dns_rewrites || []).map(r => r.domain));
       for (const cam of _installedCameras) {
         const pc = proxyMap[cam.slug];
-        if (pc) {
-          cam.proxy_enabled    = pc.enabled;
-          cam.tuya_mqtt_domain = pc.domain || '';
-          cam.proxy_dns_active = !!(pc.domain && activeRewrites.has(pc.domain));
-        }
+        if (pc) cam.proxy_enabled = pc.enabled;
       }
     }
 
@@ -908,12 +800,6 @@ function renderInstalledCameras() {
     const proxyBadge = cam.proxy_enabled
       ? `<span class="badge badge-ok">Câmera→Frigate</span>`
       : '';
-    const dnsWarning = cam.proxy_enabled && !cam.proxy_dns_active
-      ? `<button class="btn-warn-inline"
-           onclick="openProxyWarningModal('${esc(cam.slug)}', '${esc(cam.tuya_mqtt_domain||'')}')">
-           ⚠️ DNS inativo
-         </button>`
-      : '';
     return `
     <div class="inst-row fade-in" id="cam-row-${i}">
       <div class="inst-info">
@@ -924,7 +810,7 @@ function renderInstalledCameras() {
           <span class="badge badge-ok">Frigate</span>
           <span class="badge ${cam.has_localtuya ? 'badge-ok' : 'badge-dim'}">${cam.has_localtuya ? 'LocalTuya ✓' : 'LocalTuya ?'}</span>
           <span class="badge ${cam.has_scripts   ? 'badge-ok' : 'badge-dim'}">${cam.has_scripts   ? 'Scripts PTZ ✓' : 'Scripts PTZ ?'}</span>
-          ${proxyBadge}${dnsWarning}
+          ${proxyBadge}
         </div>
       </div>
       <div class="inst-actions" id="cam-actions-${i}">
@@ -1141,147 +1027,86 @@ function esc(s) {
 
 // ── DNS Rewrite management ────────────────────────────────────────────────────
 async function _updateCompanionBanner() {
-  const banner  = document.getElementById('companion-banner');
-  const icon    = document.getElementById('companion-banner-icon');
-  const text    = document.getElementById('companion-banner-text');
+  const banner    = document.getElementById('companion-banner');
+  const icon      = document.getElementById('companion-banner-icon');
+  const text      = document.getElementById('companion-banner-text');
+  const notInst   = document.getElementById('companion-not-installed');
+  const portBlock = document.getElementById('companion-proxy-port');
   if (!banner) return;
   try {
     const data = await fetch(`${API}/companion/status`).then(r => r.json());
     if (data.running) {
-      banner.style.display = 'flex';
-      banner.style.background = 'rgba(78,204,163,.08)';
-      banner.style.borderColor = 'rgba(78,204,163,.4)';
+      banner.style.background    = 'rgba(78,204,163,.08)';
+      banner.style.borderColor   = 'rgba(78,204,163,.4)';
       icon.textContent = '✅';
-      text.innerHTML = `<strong>Tuya Proxy Companion</strong> instalado e ativo — proxy MITM com iptables funcionando na porta <strong>${data.proxy?.proxy_port || 18883}</strong>.`;
+      text.innerHTML   = `<strong>Tuya Proxy Companion</strong> instalado e ativo — listener local e proxy MITM funcionando na porta <strong>${data.proxy?.proxy_port || 18883}</strong>.`;
+      if (notInst)   notInst.classList.add('hidden');
+      if (portBlock) portBlock.classList.remove('hidden');
     } else if (data.installed) {
-      banner.style.display = 'flex';
-      banner.style.background = 'rgba(245,166,35,.08)';
-      banner.style.borderColor = 'rgba(245,166,35,.4)';
+      banner.style.background    = 'rgba(245,166,35,.08)';
+      banner.style.borderColor   = 'rgba(245,166,35,.4)';
       icon.textContent = '⚠️';
-      text.innerHTML = `<strong>Tuya Proxy Companion</strong> instalado mas não está respondendo. Verifique se o add-on está rodando.`;
+      text.innerHTML   = `<strong>Tuya Proxy Companion</strong> instalado mas não está respondendo. Verifique se o add-on está rodando.`;
+      if (notInst)   notInst.classList.add('hidden');
+      if (portBlock) portBlock.classList.remove('hidden');
     } else {
-      banner.style.display = 'flex';
-      banner.style.background = 'rgba(233,69,96,.08)';
-      banner.style.borderColor = 'rgba(233,69,96,.4)';
+      banner.style.background    = 'rgba(233,69,96,.08)';
+      banner.style.borderColor   = 'rgba(233,69,96,.4)';
       icon.textContent = '❌';
-      text.innerHTML = `<strong>Tuya Proxy Companion não encontrado.</strong> Para usar o modo câmera→Frigate com bloqueio do SmartLife, instale o add-on <code>tuya-proxy-companion</code> no seu repositório HACS.`;
+      text.innerHTML   = `<strong>Tuya Proxy Companion não encontrado.</strong> Instale o add-on para habilitar detecção de movimento local.`;
+      if (notInst)   notInst.classList.remove('hidden');
+      if (portBlock) portBlock.classList.add('hidden');
     }
   } catch (err) {
-    banner.style.display = 'none';
+    icon.textContent = '❓';
+    text.textContent = 'Não foi possível verificar o status do companion.';
   }
 }
 
-async function loadDnsRewrites() {
-  const listEl = document.getElementById('dns-rewrite-list');
+async function loadProxyCameras() {
+  const listEl = document.getElementById('proxy-camera-list');
   if (!listEl) return;
-  listEl.innerHTML = '<p style="font-size:0.83rem;color:var(--text-dim)"><span class="spin">⏳</span> Carregando…</p>';
   _updateCompanionBanner();
+  listEl.innerHTML = '<p style="font-size:0.83rem;color:var(--text-dim)"><span class="spin">⏳</span> Carregando…</p>';
   try {
-    const resp = await fetch('/api/ekaza_wizard/proxy/status');
-    const data = await resp.json();
-    const allCams  = data.cameras || [];
-    const activeSet = new Set((data.dns_rewrites || []).map(r => r.domain));
-
-    // Group all cameras by unique MQTT domain (one DNS rule covers all cameras with same domain)
-    const domainMap = {};
-    for (const cam of allCams) {
-      if (!cam.domain) continue;
-      if (!domainMap[cam.domain]) domainMap[cam.domain] = [];
-      domainMap[cam.domain].push(cam);
-    }
-
-    const domains = Object.keys(domainMap);
-    if (domains.length === 0) {
-      listEl.innerHTML = '<p style="font-size:0.83rem;color:var(--text-dim)">Nenhuma câmera com domínio MQTT configurado. Instale câmeras primeiro.</p>';
+    const data = await fetch(`${API}/proxy/status`).then(r => r.json());
+    const cameras = data.cameras || [];
+    if (!cameras.length) {
+      listEl.innerHTML = '<p style="font-size:0.83rem;color:var(--text-dim)">Nenhuma câmera configurada. Instale câmeras primeiro na aba Instalar.</p>';
       return;
     }
-
-    listEl.innerHTML = domains.map(domain => {
-      const cams     = domainMap[domain];
-      // Active = proxy enabled for any camera in this domain (canonical source),
-      // OR DNS rewrite is in cache (backward compat for cameras toggled via old flow)
-      const active   = cams.some(c => c.enabled) || activeSet.has(domain);
-      const refSlug  = cams[0].slug;
-      const camNames = cams.map(c => c.slug).join(', ');
-      return `<div style="display:flex;align-items:center;gap:10px;padding:10px;background:rgba(255,255,255,.04);border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
-        <span style="font-size:1.3rem;flex-shrink:0">${active ? '✅' : '⚠️'}</span>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:0.88rem">
-            <code style="background:var(--card-bg,#0f3460);padding:1px 6px;border-radius:3px;font-size:0.83rem">${esc(domain)}</code>
-            → HA IP${active ? '' : ' <em style="font-size:0.78rem;color:var(--text-dim)">(inativo)</em>'}
-          </div>
-          <div style="font-size:0.78rem;color:var(--text-dim);margin-top:3px">
-            ${cams.length} câmera${cams.length > 1 ? 's' : ''}: ${esc(camNames)}
+    listEl.innerHTML = cameras.map(c => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;
+          background:var(--card);border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
+        <div>
+          <div style="font-weight:600;font-size:0.88rem">${esc(c.name || c.slug)}</div>
+          <div style="font-size:0.78rem;color:var(--text-dim);margin-top:2px">
+            <code>${esc(c.slug)}</code>
+            ${c.enabled
+              ? '<span class="badge badge-ok" style="margin-left:6px">Câmera→Frigate ativo</span>'
+              : '<span class="badge badge-dim" style="margin-left:6px">Inativo</span>'}
           </div>
         </div>
-        <button class="btn btn-sm ${active ? 'btn-danger' : 'btn-primary'}"
-          onclick="toggleDomainDns('${esc(domain)}', '${esc(refSlug)}', ${!active})"
-          title="${active ? 'Remove a regra DNS do AdGuard para este domínio' : 'Adiciona regra DNS no AdGuard para redirecionar MQTT das câmeras ao proxy local'}">
-          ${active ? '🗑️ Remover' : '🔀 Ativar'}
+        <button class="btn btn-sm ${c.enabled ? 'btn-secondary' : 'btn-primary'}"
+          onclick="toggleProxyCamera('${esc(c.slug)}', ${!c.enabled})">
+          ${c.enabled ? 'Desativar' : 'Ativar'}
         </button>
-      </div>`;
-    }).join('');
+      </div>`).join('');
   } catch (err) {
-    listEl.innerHTML = `<p style="font-size:0.83rem;color:var(--error,#e05252)">Erro ao carregar: ${esc(String(err))}</p>`;
+    listEl.innerHTML = `<p style="font-size:0.83rem;color:var(--err)">Erro ao carregar: ${esc(String(err))}</p>`;
   }
 }
 
-async function syncDnsRewrites() {
-  const btn  = document.getElementById('btn-dns-sync');
-  const hint = document.getElementById('dns-sync-hint');
-  btn.disabled = true;
-  hint.textContent = '⏳ Lendo do AdGuard… (~20s)';
+async function toggleProxyCamera(slug, enable) {
   try {
-    const resp = await fetch('/api/ekaza_wizard/adguard/rewrites/sync');
-    const data = await resp.json();
-    hint.textContent = data.ok
-      ? `✅ Cache atualizado — ${data.count} rewrite(s) encontrado(s)`
-      : '❌ Falha ao ler do AdGuard';
-    await loadDnsRewrites();
-  } catch (err) {
-    hint.textContent = `❌ Erro: ${err}`;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function toggleDomainDns(domain, refSlug, enable) {
-  const ticker = document.getElementById('dns-rewrite-ticker');
-  const label  = document.getElementById('dns-rewrite-ticker-label');
-  ticker.classList.remove('hidden');
-  const action = enable ? 'Ativando proxy Câmera→Frigate' : 'Desativando proxy Câmera→Frigate';
-  label.textContent = `${action} para ${domain}… (~40s)`;
-
-  try {
-    // Get all cameras with this domain to toggle all of them
-    const statusResp = await fetch('/api/ekaza_wizard/proxy/status');
-    const statusData = await statusResp.json();
-    const slugsForDomain = (statusData.cameras || [])
-      .filter(c => c.domain === domain)
-      .map(c => c.slug);
-
-    // proxy/toggle handles both DNS rewrite AND starting/stopping the MITM proxy
-    let lastErr = null;
-    for (const slug of slugsForDomain) {
-      const resp = await fetch('/api/ekaza_wizard/proxy/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug, enable }),
-      });
-      const data = await resp.json();
-      if (data.error === 'companion_missing') {
-        alert(`⚠️ Tuya Proxy Companion necessário\n\n${data.detail}`);
-        ticker.classList.add('hidden');
-        return;
-      }
-      if (!data.ok) lastErr = data.detail || 'falha desconhecida';
-    }
-    if (lastErr) alert(`Erro: ${lastErr}`);
-    await loadDnsRewrites();
-  } catch (err) {
-    alert(`Erro: ${err}`);
-  } finally {
-    ticker.classList.add('hidden');
+    await fetch(`${API}/proxy/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, enable }),
+    });
+    await loadProxyCameras();
+  } catch (e) {
+    alert(`Erro: ${e.message}`);
   }
 }
 
@@ -1289,12 +1114,10 @@ async function toggleDomainDns(domain, refSlug, enable) {
 async function loadProxyPort() {
   const statusEl = document.getElementById('proxy-port-status');
   const portInput = document.getElementById('proxy-port-input');
-  const portLabel = document.getElementById('proxy-port-label');
   try {
     const data = await fetch(`${API}/proxy/status`).then(r => r.json());
     const port = data.proxy_port || 18883;
     const running = data.proxy_running;
-    if (portLabel) portLabel.textContent = port;
     if (portInput && !portInput.value) portInput.value = port;
     if (statusEl) statusEl.innerHTML = running
       ? `✅ Proxy ativo na porta <strong>${port}</strong>`
@@ -1369,7 +1192,7 @@ loadConfig();
 loadDashboards();
 doCheck();
 loadSmartLifeStatus();
-loadDnsRewrites();  // also calls _updateCompanionBanner
+loadProxyCameras();  // also calls _updateCompanionBanner
 loadProxyPort();
 // Navega para aba solicitada via localStorage (e.g., pelo card Lovelace)
 const _ekTab = localStorage.getItem('ekaza_tab');
