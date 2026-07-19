@@ -624,6 +624,7 @@ const STEP_LABELS = {
   scripts:        'Gerando scripts PTZ',
   reload_scripts: 'Recarregando scripts',
   restart_frigate:'Reiniciando Frigate',
+  card_resource:  'Registrando card custom',
   dashboard:      'Atualizando dashboard',
   motion_bridge:  'Iniciando bridge',
 };
@@ -650,7 +651,7 @@ async function doProvision() {
 
   const cameras = selected.map(c => ({...c, rtsp_password: rtspPwd, rtsp_username: 'admin'}));
   const dashboardPath = document.getElementById('dashboard-select').value || null;
-  const total = cameras.length * 4 + 5;
+  const total = cameras.length * 4 + 6;
   updatePill('progress-pill', 0, total);
 
   try {
@@ -731,7 +732,8 @@ function handleEvent(event, d, log, total, mode) {
       scripts:                    'Criando boolean de motion bridge…',
       motion_bridge_boolean:      'Recarregando scripts…',
       reload_scripts:             'Aguardando Frigate reiniciar…',
-      reload_frigate_integration: 'Atualizando dashboard…',
+      reload_frigate_integration: 'Registrando card custom…',
+      card_resource:              'Atualizando dashboard…',
       dashboard:                  'Iniciando motion bridge…',
       motion_bridge:              'Concluindo…',
     };

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+from pathlib import Path
 
 from homeassistant.core import HomeAssistant
 
@@ -11,6 +13,8 @@ from .models import CameraInfo
 _LOGGER = logging.getLogger(__name__)
 _DASHBOARD_PATH = "cameras"
 _CARD_TYPE = "custom:ekaza-camera-card"
+_CARD_JS = "ekaza-camera-card.js"
+_CARD_URL = f"/local/{_CARD_JS}"
 
 
 def _card(cam: CameraInfo) -> dict:
@@ -23,6 +27,44 @@ def _get_dashboards(lovelace):
     if isinstance(lovelace, dict):
         return lovelace.get("dashboards", {})
     return None
+
+
+async def ensure_card_resource(hass: HomeAssistant) -> tuple[bool, str]:
+    """Deploy card JS to /config/www/ and register Lovelace resource. Idempotent."""
+    static = Path(__file__).parent / "static" / _CARD_JS
+    if not static.exists():
+        return False, f"Card JS não encontrado no pacote ({_CARD_JS})"
+
+    www = Path(hass.config.config_dir) / "www"
+    await hass.async_add_executor_job(www.mkdir, 0o755, True, True)
+    dst = www / _CARD_JS
+    await hass.async_add_executor_job(shutil.copy2, str(static), str(dst))
+
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None or not hasattr(lovelace, "resources"):
+        return (
+            True,
+            f"Card JS copiado; adicione {_CARD_URL} como recurso Lovelace manualmente",
+        )
+
+    try:
+        # async_load() initialises the store but returns None in HA 2024+;
+        # items are then available via async_items() (@callback, sync).
+        await lovelace.resources.async_load()
+        if hasattr(lovelace.resources, "async_items"):
+            items = lovelace.resources.async_items()
+        else:
+            items = list(getattr(lovelace.resources, "_data", {}).values())
+
+        if any(r.get("url") == _CARD_URL for r in items):
+            return True, "Card JS copiado; resource já registrado"
+
+        await lovelace.resources.async_create_item(
+            {"res_type": "module", "url": _CARD_URL}
+        )
+        return True, "Card JS copiado e resource registrado"
+    except Exception as exc:
+        return True, f"Card JS copiado; registro falhou: {exc}"
 
 
 async def list_dashboards(hass: HomeAssistant) -> list[dict]:

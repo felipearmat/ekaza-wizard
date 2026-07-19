@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from . import frigate as frigate_mod
 from . import motion_bridge
 from .adguard import discover_camera_mqtt_domain
-from .dashboard import update_dashboard
+from .dashboard import ensure_card_resource, update_dashboard
 from .ha_helpers import (
     assign_entity_to_area,
     create_input_boolean,
@@ -81,8 +81,8 @@ async def run(
     dashboard_path: str | None = None,
 ) -> AsyncGenerator[str, None]:
     # Total steps = cameras * 4 (onvif + localtuya + scripts + motion_bridge_boolean)
-    #             + 5 (frigate + reload_scripts + reload_frigate_integration + dashboard + bridge)
-    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 5})
+    #             + 6 (frigate + reload_scripts + reload_frigate_integration + card_resource + dashboard + bridge)
+    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 6})
 
     # Step 0: Probe RTSP port + enable ONVIF + set password per camera
     for cam in cameras:
@@ -170,7 +170,11 @@ async def run(
         if cam_area_id:
             await assign_entity_to_area(hass, f"camera.{cam.slug}", cam_area_id)
 
-    # Step 5: Add cards to Lovelace dashboard
+    # Step 5: Deploy card JS and register Lovelace resource (idempotent)
+    ok, msg = await ensure_card_resource(hass)
+    yield _sse("step", {"step": "card_resource", "ok": ok, "detail": msg})
+
+    # Step 6: Add cards to Lovelace dashboard
     ok, msg = await update_dashboard(hass, cameras, target_path=dashboard_path)
     yield _sse("step", {"step": "dashboard", "ok": ok, "detail": msg})
 

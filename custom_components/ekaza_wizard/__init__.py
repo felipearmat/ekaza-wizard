@@ -20,7 +20,7 @@ from . import adguard as adguard_mod
 from . import check as check_mod
 from . import companion as companion_mod
 from . import discovery, motion_bridge, provisioner, remover, tuya_proxy
-from .dashboard import list_dashboards
+from .dashboard import ensure_card_resource, list_dashboards
 from .const import (
     CONF_PROXY_PORT,
     CONF_RTSP_PASSWORD,
@@ -35,74 +35,28 @@ from .models import ProvisionRequest, TuyaCredentials
 
 _LOGGER = logging.getLogger(__name__)
 _STATIC = Path(__file__).parent / "static"
-_CARD_JS = "ekaza-camera-card.js"
-_CARD_URL = f"/local/{_CARD_JS}"
 PLATFORMS: list[str] = []
 
 
-async def _register_lovelace_resource(hass: HomeAssistant) -> None:
-    """Register /local/ekaza-camera-card.js as a Lovelace module resource (idempotent)."""
-    lovelace = hass.data.get("lovelace")
-    if lovelace is None:
-        _LOGGER.warning(
-            "Lovelace not in hass.data — add %s as a Lovelace resource manually",
-            _CARD_URL,
-        )
-        return
-    if not hasattr(lovelace, "resources"):
-        _LOGGER.warning(
-            "Lovelace object has no 'resources' attribute (type=%s) — add %s manually",
-            type(lovelace).__name__,
-            _CARD_URL,
-        )
-        return
-
-    try:
-        # async_load() initialises the store but returns None in HA 2024+;
-        # items are then available via async_items() (@callback, sync).
-        await lovelace.resources.async_load()
-        if hasattr(lovelace.resources, "async_items"):
-            items = lovelace.resources.async_items()
-        else:
-            items = list(getattr(lovelace.resources, "_data", {}).values())
-        if any(r.get("url") == _CARD_URL for r in items):
-            _LOGGER.warning("Lovelace resource already registered: %s", _CARD_URL)
-            return
-        await lovelace.resources.async_create_item(
-            {"res_type": "module", "url": _CARD_URL}
-        )
-        _LOGGER.warning("Lovelace resource registered: %s", _CARD_URL)
-    except Exception as exc:
-        _LOGGER.warning("Could not register Lovelace resource %s: %s", _CARD_URL, exc)
-
-
 async def _deploy_card_resource(hass: HomeAssistant) -> None:
-    """Copy bundled card JS to /config/www/ and schedule Lovelace resource registration."""
-    import shutil
+    """Copy bundled card JS to /config/www/ and register Lovelace resource.
 
-    src = _STATIC / _CARD_JS
-    if not src.exists():
-        _LOGGER.error(
-            "Card file %s not found in integration package — card will not work. "
-            "Copy %s to /config/www/ manually and add it as a Lovelace resource.",
-            src,
-            _CARD_JS,
-        )
-        return
+    Defers registration to EVENT_HOMEASSISTANT_STARTED when called during startup,
+    since the lovelace resources store may not be ready yet.
+    """
 
-    www = Path(hass.config.config_dir) / "www"
-    await hass.async_add_executor_job(www.mkdir, 0o755, True, True)
-    dst = www / _CARD_JS
-    await hass.async_add_executor_job(shutil.copy2, str(src), str(dst))
-    _LOGGER.warning("Card deployed: %s", dst)
+    async def _do() -> None:
+        ok, msg = await ensure_card_resource(hass)
+        if ok:
+            _LOGGER.warning("Card resource: %s", msg)
+        else:
+            _LOGGER.error("Card resource failed: %s", msg)
 
-    # Defer Lovelace resource registration until after all integrations are loaded,
-    # since the lovelace resources store may not be ready during setup.
     async def _on_started(_event: Event) -> None:
-        await _register_lovelace_resource(hass)
+        await _do()
 
     if hass.is_running:
-        await _register_lovelace_resource(hass)
+        await _do()
     else:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
