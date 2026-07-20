@@ -196,7 +196,6 @@ _CAMERA_STORE_VERSION = 1
 async def save_cameras(hass: HomeAssistant, cameras: list) -> None:
     """Persist camera list to HA storage (merge with existing by slug)."""
     from homeassistant.helpers.storage import Store
-    from .models import CameraInfo
     store = Store(hass, _CAMERA_STORE_VERSION, _CAMERA_STORE_KEY)
     existing = await store.async_load() or {}
     by_slug: dict = {c["slug"]: c for c in existing.get("cameras", [])}

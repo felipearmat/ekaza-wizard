@@ -1,4 +1,5 @@
 """Frigate config management via Frigate native API (/api/config/raw + /api/config/save)."""
+
 import copy
 import json
 import logging
@@ -21,6 +22,7 @@ async def _frigate_base() -> str:
     the Frigate container from within HA due to Docker bridge networking.
     """
     import os
+
     token = os.environ.get("SUPERVISOR_TOKEN", "")
     if not token:
         return f"http://127.0.0.1:{_FRIGATE_PORT}"
@@ -28,14 +30,22 @@ async def _frigate_base() -> str:
     try:
         async with aiohttp.ClientSession() as s:
             # Try known Frigate add-on slugs first, then scan all add-ons
-            r = await s.get(f"{_SUPERVISOR}/addons", headers=headers, timeout=aiohttp.ClientTimeout(total=5))
+            r = await s.get(
+                f"{_SUPERVISOR}/addons",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=5),
+            )
             if r.status == 200:
                 data = await r.json()
                 for addon in data.get("data", {}).get("addons", []):
                     slug = addon.get("slug", "")
                     name = addon.get("name", "").lower()
                     if "frigate" in slug.lower() or "frigate" in name:
-                        info_r = await s.get(f"{_SUPERVISOR}/addons/{slug}/info", headers=headers, timeout=aiohttp.ClientTimeout(total=5))
+                        info_r = await s.get(
+                            f"{_SUPERVISOR}/addons/{slug}/info",
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=5),
+                        )
                         if info_r.status == 200:
                             info = await info_r.json()
                             ip = info.get("data", {}).get("ip_address")
@@ -49,12 +59,14 @@ async def _frigate_base() -> str:
 
 def _camera_block(cam: CameraInfo) -> dict:
     if cam.proxy_enabled:
-        # camera → frigate mode: camera's own AI drives recording via MITM proxy.
-        # ML detection disabled to save CPU — the proxy fires manual events instead.
+        # cam→frigate mode: Companion intercepts MQTT, fires Frigate events manually.
+        # detect disabled — Companion drives events, not Frigate ML.
         return {
             "ffmpeg": {
                 "hwaccel_args": [],
-                "inputs": [{"path": f"rtsp://127.0.0.1:8554/{cam.slug}", "roles": ["record"]}],
+                "inputs": [
+                    {"path": f"rtsp://127.0.0.1:8554/{cam.slug}", "roles": ["record"]}
+                ],
             },
             "detect": {"enabled": False},
             "record": {"enabled": True},
@@ -63,7 +75,12 @@ def _camera_block(cam: CameraInfo) -> dict:
     return {
         "ffmpeg": {
             "hwaccel_args": [],
-            "inputs": [{"path": f"rtsp://127.0.0.1:8554/{cam.slug}", "roles": ["record", "detect"]}],
+            "inputs": [
+                {
+                    "path": f"rtsp://127.0.0.1:8554/{cam.slug}",
+                    "roles": ["record", "detect"],
+                }
+            ],
         },
         "detect": {"width": 640, "height": 360, "fps": 5},
         "record": {"enabled": True},
@@ -72,13 +89,17 @@ def _camera_block(cam: CameraInfo) -> dict:
 
 def _stream_source(cam: CameraInfo) -> list[str]:
     # ffmpeg: prefix needed — some models send malformed SDP that go2rtc rejects natively
-    return [f"ffmpeg:rtsp://{cam.rtsp_username}:{cam.rtsp_password}@{cam.ip}:{cam.rtsp_port}/stream0#video=copy"]
+    return [
+        f"ffmpeg:rtsp://{cam.rtsp_username}:{cam.rtsp_password}@{cam.ip}:{cam.rtsp_port}/stream0#video=copy"
+    ]
 
 
 async def _fetch_raw_config(base: str) -> dict:
     """Fetch current Frigate config as a parsed dict via /api/config/raw."""
     async with aiohttp.ClientSession() as s:
-        r = await s.get(f"{base}/api/config/raw", timeout=aiohttp.ClientTimeout(total=5))
+        r = await s.get(
+            f"{base}/api/config/raw", timeout=aiohttp.ClientTimeout(total=5)
+        )
         r.raise_for_status()
         text = await r.text()
         try:
@@ -88,14 +109,18 @@ async def _fetch_raw_config(base: str) -> dict:
         return yaml.safe_load(yaml_str) or {}
 
 
-async def _save_config(base: str, config: dict, option: str = "restart") -> tuple[bool, str]:
+async def _save_config(
+    base: str, config: dict, option: str = "restart"
+) -> tuple[bool, str]:
     """POST /api/config/save with the full YAML.
 
     option values:
       'restart' — save + restart Frigate (use for structural changes: add/remove cameras)
       'silent'  — save only, no restart (use for runtime flag changes; MQTT applied already)
     """
-    new_yaml = yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    new_yaml = yaml.dump(
+        config, allow_unicode=True, sort_keys=False, default_flow_style=False
+    )
     async with aiohttp.ClientSession() as s:
         r = await s.post(
             f"{base}/api/config/save?save_option={option}",
@@ -153,7 +178,10 @@ async def apply(hass, cameras: list[CameraInfo]) -> tuple[bool, str]:
         merged = _merge_cameras(existing, cameras)
         ok, msg = await _save_config(base, merged, option="restart")
         if ok:
-            return True, f"Config salvo — Frigate reiniciando ({len(cameras)} câmera(s))"
+            return (
+                True,
+                f"Config salvo — Frigate reiniciando ({len(cameras)} câmera(s))",
+            )
         return False, f"Frigate rejeitou o config: {msg}"
     except Exception as exc:
         _LOGGER.error("Frigate apply failed: %s", exc)

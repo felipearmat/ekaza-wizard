@@ -12,7 +12,6 @@ import tinytuya
 from homeassistant.core import HomeAssistant
 
 from . import frigate as frigate_mod
-from . import motion_bridge
 from .adguard import discover_camera_mqtt_domain
 from .dashboard import ensure_card_resource, update_dashboard
 from .ha_helpers import (
@@ -57,6 +56,10 @@ def _set_onvif(cam: CameraInfo) -> tuple[bool, str]:
             pwd_json = json.dumps({"old": old_pwd, "new": cam.rtsp_password})
             dev.set_value(238, pwd_json)
             time.sleep(0.3)
+        dev.set_value(
+            134, True
+        )  # enable native motion detection — default "apenas camera"
+        time.sleep(0.2)
         return True, "ONVIF habilitado"
     except Exception as exc:
         return False, str(exc)
@@ -81,8 +84,8 @@ async def run(
     dashboard_path: str | None = None,
 ) -> AsyncGenerator[str, None]:
     # Total steps = cameras * 4 (onvif + localtuya + scripts + motion_bridge_boolean)
-    #             + 6 (frigate + reload_scripts + reload_frigate_integration + card_resource + dashboard + bridge)
-    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 6})
+    #             + 5 (frigate + reload_scripts + reload_frigate_integration + card_resource + dashboard)
+    yield _sse("start", {"cameras": len(cameras), "total": len(cameras) * 4 + 5})
 
     # Step 0: Probe RTSP port + enable ONVIF + set password per camera
     for cam in cameras:
@@ -134,6 +137,17 @@ async def run(
             },
         )
 
+        # Ensure bridge starts as off — provisioning default is "apenas camera"
+        try:
+            await hass.services.async_call(
+                "input_boolean",
+                "turn_off",
+                {"entity_id": f"input_boolean.{cam.slug}_motion_bridge"},
+                blocking=True,
+            )
+        except Exception:
+            pass
+
         cam_area_id = await ensure_area(hass, cam.name)
         bool_entity = f"input_boolean.{cam.slug}_motion_bridge"
         await hide_entity(hass, bool_entity)
@@ -165,10 +179,20 @@ async def run(
     )
 
     # Assign Frigate camera entities to each camera's own area
+    # Also turn off Frigate ML detect — provisioning default is "apenas camera"
     for cam in cameras:
         cam_area_id = await ensure_area(hass, cam.name)
         if cam_area_id:
             await assign_entity_to_area(hass, f"camera.{cam.slug}", cam_area_id)
+        try:
+            await hass.services.async_call(
+                "switch",
+                "turn_off",
+                {"entity_id": f"switch.{cam.slug}_detect"},
+                blocking=True,
+            )
+        except Exception:
+            pass  # entity may not exist yet; user can set mode in card
 
     # Step 5: Deploy card JS and register Lovelace resource (idempotent)
     ok, msg = await ensure_card_resource(hass)
@@ -178,18 +202,10 @@ async def run(
     ok, msg = await update_dashboard(hass, cameras, target_path=dashboard_path)
     yield _sse("step", {"step": "dashboard", "ok": ok, "detail": msg})
 
-    # Step 6: Start motion bridge (local Tuya push — cameras without proxy)
-    await motion_bridge.start(hass, cameras)
     try:
         await save_cameras(hass, cameras)
         _LOGGER.warning("Cameras saved to storage: %s", [c.slug for c in cameras])
     except Exception as exc:
-        _LOGGER.warning(
-            "save_cameras failed (bridge running but won't persist): %s", exc
-        )
-    yield _sse(
-        "step",
-        {"step": "motion_bridge", "ok": True, "detail": "Bridge de movimento ativo"},
-    )
+        _LOGGER.warning("save_cameras failed (cameras won't persist): %s", exc)
 
     yield _sse("done", {"cameras": [c.slug for c in cameras]})

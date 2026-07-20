@@ -19,17 +19,15 @@ from homeassistant.core import Event, HomeAssistant
 from . import adguard as adguard_mod
 from . import check as check_mod
 from . import companion as companion_mod
-from . import discovery, motion_bridge, provisioner, remover, tuya_proxy
+from . import discovery, provisioner, remover
 from .dashboard import ensure_card_resource, list_dashboards
 from .const import (
-    CONF_PROXY_PORT,
     CONF_RTSP_PASSWORD,
     CONF_SEED_DEVICE_ID,
     CONF_TUYA_ACCESS_ID,
     CONF_TUYA_ACCESS_SECRET,
     CONF_TUYA_REGION,
     DOMAIN,
-    PROXY_PORT_DEFAULT,
 )
 from .models import ProvisionRequest, TuyaCredentials
 
@@ -87,20 +85,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(EkazaAdguardRestartTestView())
     hass.http.register_view(EkazaAdguardRewriteSyncView(hass))
     hass.http.register_view(EkazaAdguardRewriteView(hass))
-    hass.http.register_view(EkazaProxyPortView(hass, entry))
     hass.http.register_view(EkazaCompanionStatusView(hass))
 
     from . import frigate_syncer
     from .ha_helpers import load_cameras
-    from .motion_bridge import fire_event_for_slug
 
     hass.loop.create_task(frigate_syncer.setup(hass))
 
-    async def _restart_bridge_and_proxy() -> None:
+    async def _sync_companion_on_startup() -> None:
         cameras = await load_cameras(hass)
-        proxy_port = entry.data.get(CONF_PROXY_PORT, PROXY_PORT_DEFAULT)
-
-        # Push camera list to companion if it is running (companion owns iptables + proxy).
         companion_status = await companion_mod.get_status(hass)
         if companion_status is not None:
             cam_payloads = [
@@ -122,31 +115,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else:
                 _LOGGER.error("Companion camera sync failed on startup")
         else:
-            # Fallback: in-process proxy (no iptables — limited functionality)
-            await tuya_proxy.start(hass, cameras, fire_event_for_slug, port=proxy_port)
-            if tuya_proxy.is_running():
-                _LOGGER.warning(
-                    "Tuya MITM proxy (in-process) listening on :%d — "
-                    "install Tuya Proxy Companion add-on for full iptables support",
-                    proxy_port,
-                )
-            else:
-                _LOGGER.error(
-                    "Tuya MITM proxy failed to start on :%d — "
-                    "install Tuya Proxy Companion add-on or free the port",
-                    proxy_port,
-                )
-
-        if cameras:
-            await motion_bridge.start(hass, cameras)
             _LOGGER.warning(
-                "Motion bridge restarted for %d camera(s) after HA startup",
-                len(cameras),
+                "Tuya Proxy Companion not running — cam→frigate mode unavailable; "
+                "install the Companion add-on to enable it"
             )
-        else:
-            _LOGGER.warning("Motion bridge: no saved cameras found on startup")
 
-    hass.async_create_task(_restart_bridge_and_proxy())
+    hass.async_create_task(_sync_companion_on_startup())
     hass.async_create_task(_deploy_card_resource(hass))
 
     try:
@@ -165,8 +139,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    motion_bridge.stop()
-    await tuya_proxy.stop()
     async_remove_panel(hass, "ekaza-wizard")
     return True
 
@@ -212,7 +184,6 @@ class EkazaConfigView(HomeAssistantView):
                 "tuya_region": d.get(CONF_TUYA_REGION, "us"),
                 "rtsp_password": d.get(CONF_RTSP_PASSWORD, ""),
                 "seed_device_id": d.get(CONF_SEED_DEVICE_ID, ""),
-                "proxy_port": d.get(CONF_PROXY_PORT, PROXY_PORT_DEFAULT),
             }
         )
 
@@ -229,7 +200,6 @@ class EkazaConfigView(HomeAssistantView):
             CONF_TUYA_REGION,
             CONF_RTSP_PASSWORD,
             CONF_SEED_DEVICE_ID,
-            CONF_PROXY_PORT,
         ):
             if key in body:
                 new_data[key] = body[key]
@@ -573,10 +543,10 @@ class EkazaProxyStatusView(HomeAssistantView):
             {
                 "proxy_running": companion_status["proxy_running"]
                 if companion_status
-                else tuya_proxy.is_running(),
+                else False,
                 "proxy_port": companion_status["proxy_port"]
                 if companion_status
-                else tuya_proxy.proxy_port(),
+                else None,
                 "companion_installed": companion_status is not None,
                 "cameras": proxy_cams,
             }
@@ -635,8 +605,6 @@ class EkazaProxyToggleView(HomeAssistantView):
         ]
         if await companion_mod.get_status(self._hass) is not None:
             await companion_mod.update_cameras(self._hass, cam_payloads)
-        else:
-            tuya_proxy.update_cameras([c for c in cameras if c.proxy_enabled])
 
         try:
             await save_cameras(self._hass, cameras)
@@ -671,76 +639,6 @@ class EkazaCompanionStatusView(HomeAssistantView):
                 "slug": slug,
                 "running": status is not None,
                 "proxy": status or {},
-            }
-        )
-
-
-class EkazaProxyPortView(HomeAssistantView):
-    """GET  /api/ekaza_wizard/proxy/port?port=18883 — check if port is free.
-    POST /api/ekaza_wizard/proxy/port {"port": 18883} — save and restart proxy.
-    """
-
-    url = "/api/ekaza_wizard/proxy/port"
-    name = "api:ekaza_wizard:proxy_port"
-    requires_auth = False
-
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        self._hass = hass
-        self._entry = entry
-
-    async def get(self, request: web.Request) -> web.Response:
-        from .tuya_proxy import async_port_is_free
-
-        try:
-            port = int(request.query.get("port", PROXY_PORT_DEFAULT))
-        except ValueError:
-            return self.json({"error": "Porta inválida"}, status_code=400)
-        if not (1024 <= port <= 65535):
-            return self.json(
-                {"error": "Porta fora do intervalo permitido (1024-65535)"},
-                status_code=400,
-            )
-        free = await async_port_is_free(port)
-        current_port = self._entry.data.get(CONF_PROXY_PORT, PROXY_PORT_DEFAULT)
-        return self.json({"port": port, "free": free, "current_port": current_port})
-
-    async def post(self, request: web.Request) -> web.Response:
-        try:
-            body = await request.json()
-        except Exception:
-            return self.json({"error": "JSON inválido"}, status_code=400)
-
-        try:
-            port = int(body.get("port", PROXY_PORT_DEFAULT))
-        except (TypeError, ValueError):
-            return self.json({"error": "Porta inválida"}, status_code=400)
-        if not (1024 <= port <= 65535):
-            return self.json(
-                {"error": "Porta fora do intervalo permitido (1024-65535)"},
-                status_code=400,
-            )
-
-        from .ha_helpers import load_cameras
-        from .motion_bridge import fire_event_for_slug
-        from .tuya_proxy import async_port_is_free
-
-        free = await async_port_is_free(port)
-        if not free and port != tuya_proxy.proxy_port():
-            return self.json({"error": f"Porta {port} já está em uso"}, status_code=409)
-
-        new_data = dict(self._entry.data)
-        new_data[CONF_PROXY_PORT] = port
-        self._hass.config_entries.async_update_entry(self._entry, data=new_data)
-
-        await tuya_proxy.stop()
-        cameras = await load_cameras(self._hass)
-        await tuya_proxy.start(self._hass, cameras, fire_event_for_slug, port=port)
-
-        return self.json(
-            {
-                "ok": True,
-                "port": port,
-                "proxy_running": tuya_proxy.is_running(),
             }
         )
 

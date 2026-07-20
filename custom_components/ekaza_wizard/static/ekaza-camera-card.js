@@ -8,7 +8,7 @@
     { id: 'off',    icon: 'mdi:cancel',             label: 'Desativado',         motion: false, detect: false, bridge: false },
     { id: 'camera', icon: 'mdi:run-fast',            label: 'Apenas Câmera',     motion: true,  detect: false, bridge: false },
     { id: 'frigate',icon: 'mdi:robot',               label: 'Apenas Frigate',    motion: false, detect: true,  bridge: false },
-    { id: 'dual',   icon: 'mdi:plus-circle-outline', label: 'Câmera + Frigate',  motion: true,  detect: true,  bridge: true  },
+    { id: 'dual',   icon: 'mdi:plus-circle-outline', label: 'Câmera + Frigate',  motion: true,  detect: true,  bridge: false },
     { id: 'cam_fr', icon: 'mdi:cctv-off',            label: 'Câmera → Frigate',  motion: true,  detect: false, bridge: true  },
   ];
 
@@ -859,7 +859,7 @@
       const bridge = disc.motionBridge  ? st(disc.motionBridge)  === 'on' : false;
       if (!motion && !detect) return 'off';
       if (!motion)            return 'frigate';  // detect=true implied
-      if ( motion && detect)  return 'dual';     // both on → dual (bridge is additive automation)
+      if ( motion && detect)  return 'dual';     // both on → dual (bridge off per truth table)
       return bridge ? 'cam_fr' : 'camera';       // motion only, bridge decides cam_fr vs camera
     }
 

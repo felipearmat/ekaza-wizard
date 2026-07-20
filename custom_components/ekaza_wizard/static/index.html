@@ -179,7 +179,7 @@
 </div>
 
 <!-- ── Operation banner ── -->
-<div id="version-badge">eKaza Wizard v0.6.1</div>
+<div id="version-badge">eKaza Wizard v0.7.0</div>
 
 <div id="op-banner">
   <span class="spin">⏳</span>&nbsp;
@@ -346,24 +346,6 @@
         </p>
       </div>
 
-      <!-- Proxy port config (companion-related, shown when companion present) -->
-      <div id="companion-proxy-port">
-        <div style="margin-top:4px;margin-bottom:14px">
-          <label>Status do proxy</label>
-          <div id="proxy-port-status" style="font-size:0.85rem;padding:8px 12px;background:var(--card);border-radius:4px;border:1px solid var(--border)">
-            <span class="spin">⏳</span> Verificando…
-          </div>
-        </div>
-        <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
-          <div style="max-width:160px">
-            <label for="proxy-port-input">Porta do proxy MITM</label>
-            <input type="number" id="proxy-port-input" min="1024" max="65535" placeholder="18883">
-          </div>
-          <button class="btn btn-secondary btn-sm" onclick="checkProxyPort()" id="btn-port-check">Verificar</button>
-          <button class="btn btn-primary btn-sm" onclick="saveProxyPort()" id="btn-port-save">Salvar e reiniciar</button>
-        </div>
-        <div id="proxy-port-result" style="margin-top:10px;font-size:0.82rem;color:var(--text-dim)"></div>
-      </div>
     </div>
 
     <!-- 2. Cameras — proxy_enabled toggle per camera -->
@@ -478,7 +460,7 @@ function switchTab(tab) {
     document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === tab);
   });
   if (tab === 'remove')  loadInstalledCameras();
-  if (tab === 'privacy') { loadSmartLifeStatus(); loadProxyCameras(); loadProxyPort(); }
+  if (tab === 'privacy') { loadSmartLifeStatus(); loadProxyCameras(); }
 }
 
 // ── Dependency check ─────────────────────────────────────────────────────────
@@ -626,7 +608,6 @@ const STEP_LABELS = {
   restart_frigate:'Reiniciando Frigate',
   card_resource:  'Registrando card custom',
   dashboard:      'Atualizando dashboard',
-  motion_bridge:  'Iniciando bridge',
 };
 
 async function doProvision() {
@@ -651,7 +632,7 @@ async function doProvision() {
 
   const cameras = selected.map(c => ({...c, rtsp_password: rtspPwd, rtsp_username: 'admin'}));
   const dashboardPath = document.getElementById('dashboard-select').value || null;
-  const total = cameras.length * 4 + 6;
+  const total = cameras.length * 4 + 5;
   updatePill('progress-pill', 0, total);
 
   try {
@@ -729,13 +710,12 @@ function handleEvent(event, d, log, total, mode) {
       onvif:                      'Salvando config Frigate…',
       frigate:                    'Configurando LocalTuya…',
       localtuya:                  'Gerando scripts PTZ…',
-      scripts:                    'Criando boolean de motion bridge…',
+      scripts:                    'Criando indicador cam→frigate…',
       motion_bridge_boolean:      'Recarregando scripts…',
       reload_scripts:             'Aguardando Frigate reiniciar…',
       reload_frigate_integration: 'Registrando card custom…',
       card_resource:              'Atualizando dashboard…',
-      dashboard:                  'Iniciando motion bridge…',
-      motion_bridge:              'Concluindo…',
+      dashboard:                  'Concluindo…',
     };
     if (nextSteps[d.step]) activeLabel.textContent = nextSteps[d.step];
   }
@@ -762,7 +742,7 @@ let _removeBusy = false;
 let _removeSteps = 0;
 let _privacyBusy = false;
 let _firstStatusLoad = true;
-const REMOVE_TOTAL_STEPS = 8; // bridge, frigate_config, reload_frigate_integration, scripts, reload_scripts, localtuya, motion_bridge_boolean, dashboard
+const REMOVE_TOTAL_STEPS = 8; // proxy_cleanup, frigate_config, reload_frigate_integration, scripts, reload_scripts, localtuya, motion_bridge_boolean, dashboard
 
 async function loadInstalledCameras() {
   const list = document.getElementById('installed-list');
@@ -888,12 +868,12 @@ async function doRemove(idx) {
 }
 
 const REMOVE_STEP_LABELS = {
-  bridge:                     'Removendo do Frigate…',
+  proxy_cleanup:              'Removendo do Frigate…',
   frigate_config:             'Aguardando Frigate reiniciar…',
   reload_frigate_integration: 'Removendo scripts PTZ…',
   scripts:                    'Recarregando scripts…',
   reload_scripts:             'Removendo do LocalTuya…',
-  localtuya:                  'Removendo motion bridge…',
+  localtuya:                  'Removendo indicador cam→frigate…',
   motion_bridge_boolean:      'Removendo do dashboard…',
   dashboard:                  'Concluindo…',
 };
@@ -1028,35 +1008,31 @@ function esc(s) {
 
 // ── DNS Rewrite management ────────────────────────────────────────────────────
 async function _updateCompanionBanner() {
-  const banner    = document.getElementById('companion-banner');
-  const icon      = document.getElementById('companion-banner-icon');
-  const text      = document.getElementById('companion-banner-text');
-  const notInst   = document.getElementById('companion-not-installed');
-  const portBlock = document.getElementById('companion-proxy-port');
+  const banner  = document.getElementById('companion-banner');
+  const icon    = document.getElementById('companion-banner-icon');
+  const text    = document.getElementById('companion-banner-text');
+  const notInst = document.getElementById('companion-not-installed');
   if (!banner) return;
   try {
     const data = await fetch(`${API}/companion/status`).then(r => r.json());
     if (data.running) {
-      banner.style.background    = 'rgba(78,204,163,.08)';
-      banner.style.borderColor   = 'rgba(78,204,163,.4)';
+      banner.style.background  = 'rgba(78,204,163,.08)';
+      banner.style.borderColor = 'rgba(78,204,163,.4)';
       icon.textContent = '✅';
-      text.innerHTML   = `<strong>Tuya Proxy Companion</strong> instalado e ativo — listener local e proxy MITM funcionando na porta <strong>${data.proxy?.proxy_port || 18883}</strong>.`;
-      if (notInst)   notInst.classList.add('hidden');
-      if (portBlock) portBlock.classList.remove('hidden');
+      text.innerHTML   = `<strong>Tuya Proxy Companion</strong> instalado e ativo — listener local Tuya (DP 212) funcionando.`;
+      if (notInst) notInst.classList.add('hidden');
     } else if (data.installed) {
-      banner.style.background    = 'rgba(245,166,35,.08)';
-      banner.style.borderColor   = 'rgba(245,166,35,.4)';
+      banner.style.background  = 'rgba(245,166,35,.08)';
+      banner.style.borderColor = 'rgba(245,166,35,.4)';
       icon.textContent = '⚠️';
       text.innerHTML   = `<strong>Tuya Proxy Companion</strong> instalado mas não está respondendo. Verifique se o add-on está rodando.`;
-      if (notInst)   notInst.classList.add('hidden');
-      if (portBlock) portBlock.classList.remove('hidden');
+      if (notInst) notInst.classList.add('hidden');
     } else {
-      banner.style.background    = 'rgba(233,69,96,.08)';
-      banner.style.borderColor   = 'rgba(233,69,96,.4)';
+      banner.style.background  = 'rgba(233,69,96,.08)';
+      banner.style.borderColor = 'rgba(233,69,96,.4)';
       icon.textContent = '❌';
-      text.innerHTML   = `<strong>Tuya Proxy Companion não encontrado.</strong> Instale o add-on para habilitar detecção de movimento local.`;
-      if (notInst)   notInst.classList.remove('hidden');
-      if (portBlock) portBlock.classList.add('hidden');
+      text.innerHTML   = `<strong>Tuya Proxy Companion não encontrado.</strong> Instale o add-on para habilitar o modo Câmera → Frigate.`;
+      if (notInst) notInst.classList.remove('hidden');
     }
   } catch (err) {
     icon.textContent = '❓';
@@ -1111,90 +1087,12 @@ async function toggleProxyCamera(slug, enable) {
   }
 }
 
-// ── Proxy port ────────────────────────────────────────────────────────────────
-async function loadProxyPort() {
-  const statusEl = document.getElementById('proxy-port-status');
-  const portInput = document.getElementById('proxy-port-input');
-  try {
-    const data = await fetch(`${API}/proxy/status`).then(r => r.json());
-    const port = data.proxy_port || 18883;
-    const running = data.proxy_running;
-    if (portInput && !portInput.value) portInput.value = port;
-    if (statusEl) statusEl.innerHTML = running
-      ? `✅ Proxy ativo na porta <strong>${port}</strong>`
-      : `❌ Proxy inativo (porta configurada: <strong>${port}</strong>)`;
-  } catch (err) {
-    if (statusEl) statusEl.textContent = `Erro: ${err}`;
-  }
-}
-
-async function checkProxyPort() {
-  const portInput = document.getElementById('proxy-port-input');
-  const resultEl  = document.getElementById('proxy-port-result');
-  const btn       = document.getElementById('btn-port-check');
-  const port = parseInt(portInput.value, 10);
-  if (!port || port < 1024 || port > 65535) {
-    resultEl.textContent = '⚠️ Porta inválida (1024–65535)';
-    return;
-  }
-  btn.disabled = true;
-  resultEl.textContent = '⏳ Verificando…';
-  try {
-    const data = await fetch(`${API}/proxy/port?port=${port}`).then(r => r.json());
-    if (data.error) {
-      resultEl.textContent = `❌ ${data.error}`;
-    } else {
-      resultEl.innerHTML = data.free
-        ? `✅ Porta <strong>${port}</strong> está livre`
-        : `❌ Porta <strong>${port}</strong> já está em uso`;
-    }
-  } catch (err) {
-    resultEl.textContent = `Erro: ${err}`;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function saveProxyPort() {
-  const portInput = document.getElementById('proxy-port-input');
-  const resultEl  = document.getElementById('proxy-port-result');
-  const btn       = document.getElementById('btn-port-save');
-  const port = parseInt(portInput.value, 10);
-  if (!port || port < 1024 || port > 65535) {
-    resultEl.textContent = '⚠️ Porta inválida (1024–65535)';
-    return;
-  }
-  btn.disabled = true;
-  resultEl.textContent = '⏳ Salvando e reiniciando proxy…';
-  try {
-    const resp = await fetch(`${API}/proxy/port`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({port}),
-    });
-    const data = await resp.json();
-    if (data.error) {
-      resultEl.textContent = `❌ ${data.error}`;
-    } else {
-      resultEl.innerHTML = data.proxy_running
-        ? `✅ Proxy reiniciado na porta <strong>${port}</strong>`
-        : `⚠️ Configurado, mas proxy não iniciou na porta <strong>${port}</strong>`;
-      await loadProxyPort();
-    }
-  } catch (err) {
-    resultEl.textContent = `Erro: ${err}`;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 // ── Init ─────────────────────────────────────────────────────────────────────
 loadConfig();
 loadDashboards();
 doCheck();
 loadSmartLifeStatus();
 loadProxyCameras();  // also calls _updateCompanionBanner
-loadProxyPort();
 // Navega para aba solicitada via localStorage (e.g., pelo card Lovelace)
 const _ekTab = localStorage.getItem('ekaza_tab');
 if (_ekTab) { localStorage.removeItem('ekaza_tab'); switchTab(_ekTab); }
