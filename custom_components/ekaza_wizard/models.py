@@ -24,6 +24,8 @@ class CameraInfo(BaseModel):
     online: bool = True
     # True = MITM proxy active (cam→frigate mode); False = Frigate ML enabled (default)
     proxy_enabled: bool = False
+    # True = ARP spoof + FORWARD rules active (SmartLife/Tuya blocking feature)
+    privacy_blocked: bool = False
     tuya_mqtt_domain: Optional[str] = None  # e.g. "m.tuyaus.com"; auto-discovered
 
 

@@ -163,7 +163,9 @@ Lista as câmeras configuradas no Frigate. Para cada câmera selecionada, **desf
 
 ### Aba Privacidade
 
-Gerencia o bloqueio das câmeras à nuvem Tuya/SmartLife via **AdGuard Home**.
+Gerencia o bloqueio das câmeras à nuvem Tuya/SmartLife em **duas camadas complementares**:
+
+#### Camada 1 — DNS (AdGuard Home)
 
 O AdGuard expõe sua API apenas em `localhost`, inacessível de fora. A integração usa a **Supervisor Backup API** como contorno:
 
@@ -180,7 +182,21 @@ tuya.com  tuyaeu.com  tuyacn.com  tuyaus.com  tuyain.com
 smart-life.com  smartlifeapp.com  fogcloud.io  nebulae-iot.com
 ```
 
+#### Camada 2 — Rede (Tuya Proxy Companion)
+
+Quando o **Tuya Proxy Companion** está instalado, ativar o bloqueio SmartLife/Tuya também habilita regras de nível de rede na câmera (`privacy_blocked: true`):
+
+- **ARP spoof**: todo o tráfego internet da câmera é roteado pelo HAOS
+- **PREROUTING REDIRECT** para portas 8883, 8886 e 443 → MITM (intercepta tentativas de MQTT em todos os protocolos Tuya)
+- **FORWARD DROP UDP** (exceto DNS porta 53 e NTP porta 123) — bloqueia WebRTC, STUN/TURN, QUIC
+- **FORWARD DROP HTTP** (porta 80) — bloqueia envio de clipes por HTTP plain
+- **FORWARD ACCEPT TCP restante** — mantém a câmera em modo "reconnecting" para que o protocolo Tuya local (DP 212) continue funcionando
+
+O conjunto garante que **notificações SmartLife param** e o envio de vídeo para nuvem é bloqueado, enquanto a câmera continua gravando localmente via Frigate.
+
 > ⚠️ Com o bloqueio ativo não é possível parear novos dispositivos via Smart Life na mesma rede. Desative temporariamente para parear e reative em seguida.
+
+> ℹ️ A camada de rede só é aplicada em câmeras com o modo **Câmera → Frigate** (proxy) ativo. Novas câmeras adicionadas com proxy já ativo herdam automaticamente o estado de bloqueio.
 
 ---
 

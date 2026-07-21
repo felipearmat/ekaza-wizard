@@ -14,7 +14,12 @@ from homeassistant.helpers import entity_registry as er, device_registry as dr
 from . import adguard as adguard_mod
 from . import frigate as frigate_mod
 from .adguard import remove_dns_rewrite
-from .ha_helpers import delete_input_boolean, load_cameras, remove_camera_from_store
+from .ha_helpers import (
+    delete_input_boolean,
+    load_cameras,
+    remove_camera_from_store,
+    save_cameras,
+)
 from . import dashboard as dashboard_mod
 
 _LOGGER = logging.getLogger(__name__)
@@ -111,19 +116,78 @@ async def _cleanup_registries(
 
 
 async def block_smartlife_only(hass: HomeAssistant) -> AsyncGenerator[str, None]:
-    """Standalone: add SmartLife blocking rules to AdGuard without touching cameras."""
+    """Add SmartLife blocking rules to AdGuard and activate Companion privacy mode."""
     yield _sse("start", {"slug": "__smartlife_only__", "name": "Bloqueio SmartLife"})
+
     ok, msg = await adguard_mod.add_block_rules(hass)
     yield _sse("step", {"step": "smartlife_block", "ok": ok, "detail": msg})
+
+    # Set privacy_blocked=True on all cameras and sync to Companion so it activates
+    # ARP spoof + FORWARD rules (minimal internet access while keeping DP212 alive).
+    yield _sse(
+        "step",
+        (await _sync_privacy_blocked(hass, enabled=True)),
+    )
+
     yield _sse("done", {"slug": "__smartlife_only__", "name": "Bloqueio SmartLife"})
 
 
 async def unblock_smartlife_only(hass: HomeAssistant) -> AsyncGenerator[str, None]:
-    """Standalone: remove SmartLife blocking rules from AdGuard without touching cameras."""
+    """Remove SmartLife blocking rules from AdGuard and deactivate Companion privacy mode."""
     yield _sse("start", {"slug": "__smartlife_only__", "name": "Regras SmartLife"})
+
     ok, msg = await adguard_mod.remove_block_rules(hass)
     yield _sse("step", {"step": "smartlife_unblock", "ok": ok, "detail": msg})
+
+    yield _sse(
+        "step",
+        (await _sync_privacy_blocked(hass, enabled=False)),
+    )
+
     yield _sse("done", {"slug": "__smartlife_only__", "name": "Regras SmartLife"})
+
+
+async def _sync_privacy_blocked(hass: HomeAssistant, *, enabled: bool) -> dict:
+    """Set privacy_blocked on all cameras, persist, and push to Companion. Returns step dict."""
+    from . import companion as companion_mod
+
+    step = "privacy_block_sync"
+    try:
+        cameras = await load_cameras(hass)
+        for cam in cameras:
+            cam.privacy_blocked = enabled
+        await save_cameras(hass, cameras)
+
+        companion_status = await companion_mod.get_status(hass)
+        if companion_status is not None:
+            payloads = [
+                {
+                    "slug": c.slug,
+                    "ip": c.ip,
+                    "proxy_enabled": c.proxy_enabled,
+                    "privacy_blocked": c.privacy_blocked,
+                    "tuya_mqtt_domain": c.tuya_mqtt_domain or "m.tuyaus.com",
+                    "device_id": c.device_id,
+                    "local_key": c.local_key,
+                }
+                for c in cameras
+            ]
+            sync_ok = await companion_mod.update_cameras(hass, payloads)
+            detail = (
+                f"Privacy {'activated' if enabled else 'deactivated'} on Companion "
+                f"({len(payloads)} camera(s))"
+                if sync_ok
+                else "Companion sync failed — state saved, will apply on next restart"
+            )
+            return {"step": step, "ok": sync_ok, "detail": detail}
+
+        return {
+            "step": step,
+            "ok": True,
+            "detail": "Companion not running — state saved for next sync",
+        }
+    except Exception as exc:
+        return {"step": step, "ok": False, "detail": str(exc)}
 
 
 async def list_cameras(hass: HomeAssistant) -> list[dict]:

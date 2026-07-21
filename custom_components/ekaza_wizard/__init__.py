@@ -101,6 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "slug": c.slug,
                     "ip": c.ip,
                     "proxy_enabled": c.proxy_enabled,
+                    "privacy_blocked": c.privacy_blocked,
                     "tuya_mqtt_domain": c.tuya_mqtt_domain or "m.tuyaus.com",
                     "device_id": c.device_id,
                     "local_key": c.local_key,
@@ -593,12 +594,20 @@ class EkazaProxyToggleView(HomeAssistantView):
 
         cam.proxy_enabled = enable
 
+        # When enabling proxy, inherit privacy_blocked from the global SmartLife blocking
+        # state so a newly-added camera is immediately subject to the same privacy rules.
+        if enable and not cam.privacy_blocked:
+            cam.privacy_blocked = any(
+                c.privacy_blocked for c in cameras if c.slug != slug
+            )
+
         # Sync updated camera list to companion (owns iptables) or fallback in-process proxy.
         cam_payloads = [
             {
                 "slug": c.slug,
                 "ip": c.ip,
                 "proxy_enabled": c.proxy_enabled,
+                "privacy_blocked": c.privacy_blocked,
                 "tuya_mqtt_domain": c.tuya_mqtt_domain or "m.tuyaus.com",
                 "device_id": c.device_id,
                 "local_key": c.local_key,
