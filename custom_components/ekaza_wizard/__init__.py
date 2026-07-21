@@ -558,8 +558,10 @@ class EkazaProxyToggleView(HomeAssistantView):
 
     Body: {"slug": "...", "enable": true}
 
-    Marks camera proxy_enabled in storage and syncs the updated list to the
-    Tuya Proxy Companion (which owns the local Tuya listener and iptables rules).
+    Marks camera proxy_enabled in storage, syncs the updated list to the Tuya Proxy
+    Companion (which owns the local Tuya listener and iptables rules), and manages the
+    AdGuard DNS rewrite so the camera resolves its MQTT broker to this HA host (required
+    for the iptables REDIRECT to intercept the camera's cloud MQTT traffic).
     """
 
     url = "/api/ekaza_wizard/proxy/toggle"
@@ -610,6 +612,33 @@ class EkazaProxyToggleView(HomeAssistantView):
             await save_cameras(self._hass, cameras)
         except Exception as exc:
             _LOGGER.warning("proxy toggle: save_cameras failed: %s", exc)
+
+        # Manage AdGuard DNS rewrite asynchronously — the backup/restore cycle takes ~40s
+        # and must not block this response. Without the rewrite, the camera resolves the
+        # Tuya MQTT broker to a cloud IP and bypasses the iptables REDIRECT entirely.
+        if cam.tuya_mqtt_domain:
+            ha_ip = (
+                self._hass.config.api.local_ip
+                if self._hass.config.api and self._hass.config.api.local_ip
+                else "127.0.0.1"
+            )
+
+            async def _manage_rewrite() -> None:
+                from .adguard import add_dns_rewrite, remove_dns_rewrite
+
+                domain = cam.tuya_mqtt_domain
+                if enable:
+                    ok, msg = await add_dns_rewrite(domain, ha_ip)
+                else:
+                    ok, msg = await remove_dns_rewrite(domain, ha_ip)
+                if ok:
+                    _LOGGER.warning("proxy toggle: DNS rewrite %s: %s", domain, msg)
+                else:
+                    _LOGGER.error(
+                        "proxy toggle: DNS rewrite failed for %s: %s", domain, msg
+                    )
+
+            self._hass.async_create_task(_manage_rewrite())
 
         return self.json(
             {
